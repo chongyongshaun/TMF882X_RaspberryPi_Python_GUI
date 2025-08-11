@@ -73,6 +73,28 @@ class DataReader(threading.Thread):
         self.sock.close()
         print("DataReader stopped.")
 
+    def take_n_measurements(self, n):
+        """
+        Take n measurements and return the data, useful for taking the irf measurement, only runs if measuring is False to prevent it from clashing with live measurements.
+        :param n: Number of measurements to take
+        :return: None
+        """   
+        print(f"Taking {n} measurements...")
+        for _ in range(n):
+            self.sock.sendall(b'(m0)')  # Trigger measurement
+            response = read_all(self.sock)
+            for line in response.splitlines():
+                for channel in self.selected_channels: # check if the channel is in the selected channels and update the data queue
+                    target = f'#HLONG{channel:02d}'
+                    if line.startswith(target):
+                        # if file_path is set and saving is enabled save the data to a csv file
+                        if self.file_path and self.saving_to_csv:
+                            with open(self.file_path, 'a') as f:
+                                f.write(line + '\n')
+                            self.plot_data_queue.put(line)
+                            self.fitting_data_queue.put(line) 
+                            break
+
     def toggle_measurement(self):
         if self.measuring:
             self.measuring = False
