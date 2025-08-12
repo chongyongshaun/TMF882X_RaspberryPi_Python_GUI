@@ -43,6 +43,7 @@ class TMF8828RaspberryPiGUI:
         self.reader = DataReader(self.plot_data_queue, self.fit_data_queue, self.selected_channels, self.status_queue)
 
         self.fitting_worker = None
+        self.save_fitting = False
         self.left_frame = ttk.Frame(self.frame)
         self.left_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")    
         self.right_frame = ttk.Frame(self.frame)
@@ -131,6 +132,14 @@ class TMF8828RaspberryPiGUI:
         output = Contini1997([rho], t, s, mua, musp, n1, n2, phantom, mua_independent, m)["total"][0][0]
         model_conv = convolve_irf_with_model(self.contini_model_panel.irf, output, geometry=GEOMETRY.REFLECTANCE, offset=0, normalize_irf=True, normalize_model=True, denest_contini_output=False)
         
+
+        if self.save_fitting and self.file_path_var.get():
+            #save raw model_conv to a csv file
+            file_path = self.file_path_var.get()
+            with open(file_path, 'a') as f:
+                # Convert each value in model_conv to string and join with commas
+                csv_line = ','.join(str(val) for val in model_conv)
+                f.write(csv_line + '\n')
         model_conv = model_conv/max(model_conv) #NORMALIZING
         self.model_line.set_ydata(model_conv)
 
@@ -138,6 +147,8 @@ class TMF8828RaspberryPiGUI:
             residual = self.y_data - model_conv
             self.residual_line.set_ydata(residual)
             self.residual_ax.set_ylim(residual.min() * 1.1, residual.max() * 1.1)
+        
+
 
         self.canvas.draw()
         print("Model line updated with new fit result.")
@@ -320,6 +331,7 @@ class TMF8828RaspberryPiGUI:
         self.start_reader_button.grid(row=6, column=0, padx=5, pady=5)   
         self.toggle_measurement_button = tk.Button(self.control_frame, text="Toggle Measurement", command=self.reader.toggle_measurement, state=tk.DISABLED)
         self.toggle_measurement_button.grid(row=6, column=1, padx=5, pady=5)
+        tk.Button(self.control_frame, text="Start Live Fitting", command=self.start_fitting_worker).grid(row=6, column=2, padx=5, pady=5)
 
         # ROW 7: File selection and saving options and start live fitting button
         self.file_path_var = tk.StringVar()
@@ -330,7 +342,18 @@ class TMF8828RaspberryPiGUI:
         self.file_path_button.grid(row=7, column=1, padx=5, pady=5)
         self.save_meas_checkbox = tk.Checkbutton(self.control_frame, text="Save Measurement to CSV", bg="white", command=self.reader.toggle_saving_to_csv)
         self.save_meas_checkbox.grid(row=7, column=2, padx=5, pady=5)
-        tk.Button(self.control_frame, text="Start Live Fitting", command=self.start_fitting_worker).grid(row=7, column=3, padx=5, pady=5)
+        self.save_fit_checkbox = tk.Checkbutton(self.control_frame, text="Save Fitting Curve to CSV", bg="white", command=self.toggle_saving_fitting)
+        self.save_fit_checkbox.grid(row=7, column=3, padx=5, pady=5)
+    
+    def toggle_saving_fitting(self):
+        """Toggle the saving of fitting data to a CSV file."""
+        self.save_fitting = not self.save_fitting
+        if self.save_fitting:
+            self.file_path_var.set("Fitting data will be saved to the selected file.")
+            if not self.file_path_var.get():
+                messagebox.showwarning("Warning", "Please select a file to save the fitting data.")
+        else:
+            self.file_path_var.set("Fitting data will not be saved.")
     
     def start_reader(self):
             self.reader.start()
