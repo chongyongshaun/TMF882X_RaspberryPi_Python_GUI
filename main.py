@@ -23,7 +23,7 @@ from test_contini_model import GEOMETRY
 
 # -------------- TMF8828 Raspberry Pi Class --------------
 #TODO: options to save the meas curve                       DONE
-#TODO: options to save the fitted curve
+#TODO: options to save the fitted curve                     DONE      
 #TODO: option to take 1 measurement and save as irf         
 #TODO: live mua musp,                                       DONE
 #TODO: smart crop, 80% 1%                                   DONE
@@ -332,6 +332,15 @@ class TMF8828RaspberryPiGUI:
         self.toggle_measurement_button = tk.Button(self.control_frame, text="Toggle Measurement", command=self.reader.toggle_measurement, state=tk.DISABLED)
         self.toggle_measurement_button.grid(row=6, column=1, padx=5, pady=5)
         tk.Button(self.control_frame, text="Start Live Fitting", command=self.start_fitting_worker).grid(row=6, column=2, padx=5, pady=5)
+
+        tk.Label(self.control_frame, text="Take N measurements:", bg="white").grid(row=6, column=3, sticky="w")
+        self.n_measurements_var = tk.IntVar(value=1)
+        tk.Entry(self.control_frame, textvariable=self.n_measurements_var, width=5).grid(row=6, column=4)
+        tk.Button(
+            self.control_frame,
+            text="Take N",
+            command=lambda: self.reader.take_n_measurements(self.n_measurements_var.get())
+        ).grid(row=6, column=5, padx=5, pady=5)
 
         # ROW 7: File selection and saving options and start live fitting button
         self.file_path_var = tk.StringVar()

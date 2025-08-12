@@ -80,6 +80,9 @@ class DataReader(threading.Thread):
         :return: None
         """   
         print(f"Taking {n} measurements...")
+        if self.measuring:
+            print("Live measurements are running. Please stop them before taking manual measurements.")
+            return
         for _ in range(n):
             self.sock.sendall(b'(m0)')  # Trigger measurement
             response = read_all(self.sock)
