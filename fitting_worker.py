@@ -21,6 +21,7 @@ class FittingWorker(threading.Thread):
         self.irf = irf
         self.result_callback = result_callback
         self.interval = interval
+        self.filter_largest_peak = True
 
         self.running = True
 
@@ -41,6 +42,9 @@ class FittingWorker(threading.Thread):
                     values = np.array(list(map(int, parts[1:])))
                     print(f"[FittingWorker] Latest data values: {values}")
 
+                    if self.filter_largest_peak:
+                        from peak_filtering import filter_largest_peak
+                        values = filter_largest_peak(values)
                     fit_result = self.perform_fit(values, settings, self.irf)
 
                     if self.result_callback:
@@ -86,5 +90,12 @@ class FittingWorker(threading.Thread):
         mua, musp = res[0], res[1]
         return {"mua": mua, "musp": musp}
 
+    def toggle_filter_largest_peak(self):
+        """
+        Toggle the filter_largest_peak setting.
+        """
+        self.filter_largest_peak = not self.filter_largest_peak
+        print(f"[FittingWorker] Filter largest peak set to: {self.filter_largest_peak}")
+        
     def stop(self):
         self.running = False

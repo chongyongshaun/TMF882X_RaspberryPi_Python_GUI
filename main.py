@@ -21,12 +21,8 @@ from diffusion_equation.fit import convolve_irf_with_model
 from fitting_worker import FittingWorker
 from test_contini_model import GEOMETRY
 
-# -------------- TMF8828 Raspberry Pi Class --------------
-#TODO: options to save the meas curve                       DONE
-#TODO: options to save the fitted curve                     DONE      
-#TODO: option to take 1 measurement and save as irf         
-#TODO: live mua musp,                                       DONE
-#TODO: smart crop, 80% 1%                                   DONE
+# -------------- TMF8828 Raspberry Pi Class --------------   
+#TODO: option to take 1 measurement and save as irf          
 class TMF8828RaspberryPiGUI:
     def __init__(self, root):
         self.root = root
@@ -43,11 +39,14 @@ class TMF8828RaspberryPiGUI:
         self.reader = DataReader(self.plot_data_queue, self.fit_data_queue, self.selected_channels, self.status_queue)
 
         self.fitting_worker = None
-        self.save_fitting = False
         self.left_frame = ttk.Frame(self.frame)
         self.left_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")    
         self.right_frame = ttk.Frame(self.frame)
         self.right_frame.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
+        
+        #options:
+        self.save_fitting = False
+        self.normalize_graph_output = tk.BooleanVar(value=True)  # Default to True 
 
         # top left corner
         self.model_frame = tk.LabelFrame(self.left_frame, text="Model", padx=5, pady=5, bg="white")
@@ -67,6 +66,7 @@ class TMF8828RaspberryPiGUI:
         self.status_labels = {}
         self.build_status_display()
         self.update_status_display()
+        self.build_graph_frame_misc()
 
         # self.fig, self.ax = plt.subplots()
         # self.bars = self.ax.bar(np.arange(128), np.zeros(128))
@@ -140,7 +140,8 @@ class TMF8828RaspberryPiGUI:
                 # Convert each value in model_conv to string and join with commas
                 csv_line = ','.join(str(val) for val in model_conv)
                 f.write(csv_line + '\n')
-        model_conv = model_conv/max(model_conv) #NORMALIZING
+        if self.normalize_graph_output.get(): #normalize before plotting
+            model_conv = model_conv/max(model_conv) 
         self.model_line.set_ydata(model_conv)
 
         if len(model_conv) == len(self.y_data):
@@ -148,8 +149,6 @@ class TMF8828RaspberryPiGUI:
             self.residual_line.set_ydata(residual)
             self.residual_ax.set_ylim(residual.min() * 1.1, residual.max() * 1.1)
         
-
-
         self.canvas.draw()
         print("Model line updated with new fit result.")
 
@@ -163,7 +162,8 @@ class TMF8828RaspberryPiGUI:
                     # for bar, val in zip(self.bars, values): #this one is for bar graph
                     #     bar.set_height(val)
                     # self.ax.set_ylim(0, values.max() * 1.1)
-                    values = values / max(values) #NORMALIZING
+                    if self.normalize_graph_output.get():  # Normalize if the option is selected
+                        values = values / max(values) 
                     self.y_data = values
                     self.line.set_ydata(self.y_data)
                     # self.ax.set_ylim(0, max(100, values.max() * 1.1))  # Keep minimum Y max
@@ -179,13 +179,6 @@ class TMF8828RaspberryPiGUI:
     def build_status_display(self):
         status_frame = tk.LabelFrame(self.graph_frame, text="Sensor Status", padx=5, pady=5, bg="white")
         status_frame.grid(row=2, column=0, padx=5, pady=5, sticky="w")
-
-        # Create a StringVar to hold the dynamic text
-        self.fit_result_var = tk.StringVar()
-        self.fit_result_var.set("μa: ---, μs': ---")
-        # Label bound to the StringVar
-        fit_label = tk.Label(self.graph_frame, textvariable=self.fit_result_var, font=("Arial", 14))
-        fit_label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
 
         status_fields = [
             "Timestamp", "Iterations", "Threshold", "SPAD Map ID",
@@ -231,6 +224,39 @@ class TMF8828RaspberryPiGUI:
 
         for key, value in status_values.items():
             self.status_labels[key].config(text=f"{key}: {value}")
+
+    """
+    Other options on the graph frame Methods
+    """
+    def build_graph_frame_misc(self):
+        # Create a StringVar to hold the dynamic text
+        self.fit_result_var = tk.StringVar()
+        self.fit_result_var.set("μa: ---, μs': ---")
+        tk.Label(self.graph_frame, text="Fitting Result:", bg="white").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        # Label bound to the StringVar
+        fit_label = tk.Label(self.graph_frame, textvariable=self.fit_result_var, font=("Arial", 14))
+        fit_label.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+
+        plotting_options_frame = tk.LabelFrame(self.graph_frame, text="Plotting Options", padx=5, pady=5, bg="white")
+        plotting_options_frame.grid(row=4, column=0, padx=5, pady=5, sticky="w")
+        # Normalize output checkbox
+        normalize_checkbox = tk.Checkbutton(
+            plotting_options_frame,
+            text="Normalize Graph Output",
+            variable=self.normalize_graph_output,
+            bg="white"
+        )
+        normalize_checkbox.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        filter_before_fit_var = tk.BooleanVar(value=True) #placeholder for filter largest peak option, set it to true so the checkbox is checked by default
+        filter_meas_checkbox = tk.Checkbutton(
+            plotting_options_frame,
+            text="Filter Largest Peak and Noise before fitting",
+            bg="white",
+            variable=filter_before_fit_var,
+            command=lambda: self.fitting_worker.toggle_filter_largest_peak() if self.fitting_worker else None,
+        )
+        filter_meas_checkbox.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+
 
 
 
