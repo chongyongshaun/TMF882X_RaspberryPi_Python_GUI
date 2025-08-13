@@ -21,7 +21,7 @@ class FittingWorker(threading.Thread):
         self.irf = irf
         self.result_callback = result_callback
         self.interval = interval
-        self.filter_largest_peak = True
+        self.filter_largest_peak = False
 
         self.running = True
 

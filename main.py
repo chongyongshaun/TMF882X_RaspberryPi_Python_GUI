@@ -110,6 +110,7 @@ class TMF8828RaspberryPiGUI:
             )
             self.fitting_worker.start()
             print("Fitting worker started.")
+            self.filter_meas_checkbox.config(state=tk.NORMAL)  # Initially disabled
 
     #callback function for FittingWorker, if you want to do something with the fit result this function will be called whenever a fit result is available
     def handle_fit_result(self, fit_result): 
@@ -247,17 +248,14 @@ class TMF8828RaspberryPiGUI:
             bg="white"
         )
         normalize_checkbox.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        filter_before_fit_var = tk.BooleanVar(value=True) #placeholder for filter largest peak option, set it to true so the checkbox is checked by default
-        filter_meas_checkbox = tk.Checkbutton(
+        self.filter_meas_checkbox = tk.Checkbutton(
             plotting_options_frame,
             text="Filter Largest Peak and Noise before fitting",
             bg="white",
-            variable=filter_before_fit_var,
             command=lambda: self.fitting_worker.toggle_filter_largest_peak() if self.fitting_worker else None,
         )
-        filter_meas_checkbox.grid(row=1, column=0, padx=5, pady=5, sticky="w")
-
-
+        self.filter_meas_checkbox.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.filter_meas_checkbox.config(state=tk.DISABLED)  # Initially disabled
 
 
     """
