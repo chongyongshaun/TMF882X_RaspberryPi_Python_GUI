@@ -83,6 +83,9 @@ class DataReader(threading.Thread):
         if self.measuring:
             print("Live measurements are running. Please stop them before taking manual measurements.")
             return
+        # Clear and empty the file before taking measurements
+        if self.file_path and self.saving_to_csv:
+            open(self.file_path, 'w').close()
         for _ in range(n):
             self.sock.sendall(b'(m0)')  # Trigger measurement
             response = read_all(self.sock)
@@ -94,9 +97,9 @@ class DataReader(threading.Thread):
                         if self.file_path and self.saving_to_csv:
                             with open(self.file_path, 'a') as f:
                                 f.write(line + '\n')
-                            self.plot_data_queue.put(line)
-                            self.fitting_data_queue.put(line) 
-                            break
+                        self.plot_data_queue.put(line)
+                        self.fitting_data_queue.put(line) 
+                        break
 
     def toggle_measurement(self):
         if self.measuring:
@@ -112,7 +115,7 @@ class DataReader(threading.Thread):
         This is a placeholder function, as the actual saving logic is not implemented here.
         """
         self.file_path = file_path
-        print(f"File path set to: {file_path}")
+        print(f"Measurement curve's file path set to: {file_path}")
 
     def toggle_saving_to_csv(self):
         """

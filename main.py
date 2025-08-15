@@ -21,8 +21,7 @@ from diffusion_equation.fit import convolve_irf_with_model
 from fitting_worker import FittingWorker
 from test_contini_model import GEOMETRY
 
-# -------------- TMF8828 Raspberry Pi Class --------------   
-#TODO: option to take 1 measurement and save as irf          
+# -------------- TMF8828 Raspberry Pi Class --------------    
 class TMF8828RaspberryPiGUI:
     def __init__(self, root):
         self.root = root
@@ -39,14 +38,22 @@ class TMF8828RaspberryPiGUI:
         self.reader = DataReader(self.plot_data_queue, self.fit_data_queue, self.selected_channels, self.status_queue)
 
         self.fitting_worker = None
-        self.left_frame = ttk.Frame(self.frame)
-        self.left_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")    
-        self.right_frame = ttk.Frame(self.frame)
-        self.right_frame.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
+
+        # Create notebook inside main frame
+        self.notebook = ttk.Notebook(self.frame)
+        self.notebook.pack(fill="both", expand=True)
+
+        # Two tabs: left and right content
+        self.left_frame = ttk.Frame(self.notebook)
+        self.right_frame = ttk.Frame(self.notebook)
+
+        self.notebook.add(self.left_frame, text="Control & Model")
+        self.notebook.add(self.right_frame, text="Graph")
         
         #options:
         self.save_fitting = False
         self.normalize_graph_output = tk.BooleanVar(value=True)  # Default to True 
+        self.EPS = 1e-6  # small positive number
 
         # top left corner
         self.model_frame = tk.LabelFrame(self.left_frame, text="Model", padx=5, pady=5, bg="white")
@@ -117,7 +124,7 @@ class TMF8828RaspberryPiGUI:
 
         print("Live Fit Result:", fit_result) 
         # update the fit result label
-        self.fit_result_var.set(f"μa: {fit_result['mua']:.4f}, μs': {fit_result['musp']:.4f}")
+        self.fit_result_var.set(f"Fit Result: μa: {fit_result['mua']:.4f}, μs': {fit_result['musp']:.4f}")
 
         # create the fitting curve using the model
         mua, musp = fit_result["mua"], fit_result["musp"]
@@ -139,10 +146,13 @@ class TMF8828RaspberryPiGUI:
             file_path = self.file_path_var.get()
             with open(file_path, 'a') as f:
                 # Convert each value in model_conv to string and join with commas
-                csv_line = ','.join(str(val) for val in model_conv)
+                csv_line = "#FIT;" + ';'.join(str(val) for val in model_conv)
                 f.write(csv_line + '\n')
         if self.normalize_graph_output.get(): #normalize before plotting
             model_conv = model_conv/max(model_conv) 
+        if self.use_log_scale.get():
+            EPS = 1e-6
+            model_conv = np.clip(model_conv, EPS, None)  # Avoid zero in log scale
         self.model_line.set_ydata(model_conv)
 
         if len(model_conv) == len(self.y_data):
@@ -165,10 +175,15 @@ class TMF8828RaspberryPiGUI:
                     # self.ax.set_ylim(0, values.max() * 1.1)
                     if self.normalize_graph_output.get():  # Normalize if the option is selected
                         values = values / max(values) 
+                    values[values <= 0] = self.EPS
                     self.y_data = values
                     self.line.set_ydata(self.y_data)
-                    # self.ax.set_ylim(0, max(100, values.max() * 1.1))  # Keep minimum Y max
-                    self.ax.set_ylim(0, values.max() * 1.1)  # Keep minimum Y max
+
+                    if self.use_log_scale.get():
+                        EPS = 1e-6
+                        values = np.clip(values, EPS, None)  # Avoid zero in log scale
+
+                    self._safe_adjust_ylim() 
                     self.canvas.draw()
                 except Exception as e:
                     print(f"Error: {e}")
@@ -232,11 +247,10 @@ class TMF8828RaspberryPiGUI:
     def build_graph_frame_misc(self):
         # Create a StringVar to hold the dynamic text
         self.fit_result_var = tk.StringVar()
-        self.fit_result_var.set("μa: ---, μs': ---")
-        tk.Label(self.graph_frame, text="Fitting Result:", bg="white").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        self.fit_result_var.set("Fit Result: μa: ---, μs': ---")
         # Label bound to the StringVar
         fit_label = tk.Label(self.graph_frame, textvariable=self.fit_result_var, font=("Arial", 14))
-        fit_label.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+        fit_label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
 
         plotting_options_frame = tk.LabelFrame(self.graph_frame, text="Plotting Options", padx=5, pady=5, bg="white")
         plotting_options_frame.grid(row=4, column=0, padx=5, pady=5, sticky="w")
@@ -256,6 +270,49 @@ class TMF8828RaspberryPiGUI:
         )
         self.filter_meas_checkbox.grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.filter_meas_checkbox.config(state=tk.DISABLED)  # Initially disabled
+        self.use_log_scale = tk.BooleanVar(value=False)
+        log_checkbox = tk.Checkbutton(
+            plotting_options_frame,
+            text="Use Logarithmic Y-Axis",
+            variable=self.use_log_scale,
+            bg="white",
+            command=self.toggle_log_scale
+        )
+        log_checkbox.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+
+
+    def toggle_log_scale(self):
+        """Toggle between linear and logarithmic Y-axis."""
+        if self.use_log_scale.get():
+            self.ax.set_yscale("log")
+            self.residual_ax.set_yscale("log")
+        else:
+            self.ax.set_yscale("linear")
+            self.residual_ax.set_yscale("linear")
+        
+        self._safe_adjust_ylim()
+        self.canvas.draw_idle()
+
+    def _safe_adjust_ylim(self):
+        EPS = 1e-6  # Small positive number
+        ymin = EPS if self.ax.get_yscale() == "log" else 0
+
+        # Measurement curve
+        y_max_meas = max(self.y_data.max(), EPS)
+        self.ax.set_ylim(ymin, y_max_meas * 1.1)
+
+        # Residual plot
+        y_resid = self.residual_line.get_ydata()
+        if len(y_resid) > 0:
+            y_min_resid = min(y_resid.min(), -EPS)
+            y_max_resid = max(y_resid.max(), EPS)
+            if self.residual_ax.get_yscale() == "log":
+                # Residuals can be negative, so for log scale we take absolute values
+                y_max_abs = max(abs(y_min_resid), abs(y_max_resid), EPS)
+                self.residual_ax.set_ylim(EPS, y_max_abs * 1.1)
+            else:
+                self.residual_ax.set_ylim(y_min_resid * 1.1, y_max_resid * 1.1)
+
 
 
     """
@@ -382,7 +439,7 @@ class TMF8828RaspberryPiGUI:
         """Toggle the saving of fitting data to a CSV file."""
         self.save_fitting = not self.save_fitting
         if self.save_fitting:
-            self.file_path_var.set("Fitting data will be saved to the selected file.")
+            print("Saving fitting data to CSV is enabled.")
             if not self.file_path_var.get():
                 messagebox.showwarning("Warning", "Please select a file to save the fitting data.")
         else:
@@ -394,10 +451,10 @@ class TMF8828RaspberryPiGUI:
             self.toggle_measurement_button.config(state=tk.NORMAL)
 
     def select_file(self):
-        file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
         if file_path:
             self.file_path_var.set(os.path.basename(file_path))
-            self.reader.set_file_path(file_path)
+            self.reader.set_file_path(os.path.basename(file_path))
         else:
             self.file_path_var.set("No file selected")
 
@@ -437,13 +494,14 @@ class MainApp:
         self.root = root
         self.root.title("TMF882X Raspberry Pi GUI")
 
-        notebook = ttk.Notebook(root)
-        self.tmf8828_rasp_tab = ttk.Frame(notebook)
+        # notebook = ttk.Notebook(root)
+        # self.tmf8828_rasp_tab = ttk.Frame(notebook)
 
-        notebook.add(self.tmf8828_rasp_tab, text="TMF882X Raspberry Pi Measurement")
-        notebook.pack(expand=True, fill="both")
+        # notebook.add(self.tmf8828_rasp_tab, text="TMF882X Raspberry Pi Measurement")
+        # notebook.pack(expand=True, fill="both")
 
-        TMF8828RaspberryPiGUI(self.tmf8828_rasp_tab)
+        # TMF8828RaspberryPiGUI(self.tmf8828_rasp_tab)
+        self.tmf8828_rasp_gui = TMF8828RaspberryPiGUI(root)
 
 if __name__ == "__main__":
     #Run app

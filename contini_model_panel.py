@@ -399,10 +399,13 @@ class ContiniModelPanel:
         try:
             with open(file_path, 'r') as file:
                 reader = csv.reader(file)
-                for row in reader:
-                    self.irf = [float(value) for value in row]
-                    break  # Only read the first line
-
+                first_row = next(reader)
+                if first_row and first_row[0].startswith("#HLONG"):
+                    first_row = first_row[0].split(';')
+                    self.irf = [float(value) for value in first_row[1:] if value.strip()]
+                else:
+                    self.irf = [float(value) for value in first_row]
+                print(f"self.irf: {self.irf}")
                 # Update the IRF plot
                 self.irf_ax.clear()
                 self.irf_ax.set_title("IRF")
