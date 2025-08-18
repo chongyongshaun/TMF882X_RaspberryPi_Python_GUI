@@ -7,6 +7,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from diffusion_equation.diffusion_equation import Contini1997
 from diffusion_equation.fit import convolve_irf_with_model, model, GEOMETRY
 
+# add log scale to both figures
 class ContiniModelPanel:
     """
     A class to represent the Contini model panel for diffusion equations.
@@ -32,12 +33,12 @@ class ContiniModelPanel:
         self.convolved_ax, self.convolved_canvas = self._create_plot_frame(self.plot_frame, "Convolved")
 
         self.params = {
-            'rho': '15',
+            'rho': '5',
             # 'time_step (ns)': '0.004', #4e-12
             # 'num_bins': '4096',
-            'time_step (ns)': '0.19',
+            'time_step (ns)': '0.38',
             'num_bins': '128',
-            's': '1',
+            's': '1000',
             'mua': '0.01', # mm^{-1}
             'musp': '1', # mm^{-1}
             'n1': '1',
@@ -47,9 +48,9 @@ class ContiniModelPanel:
             'm': '200',
             'geometry': GEOMETRY.REFLECTANCE,  # Measurement geometry
             't' : None, # this is calculated from time_step and num_bins
-            'fit_start': 'auto',  # Start bin for fitting
-            'fit_end': 'auto',   # End bin for fitting These should be dynamically calculated based on the length of the time array, 10-100 assumes 128 bins
-            'smart_crop': 'True',  # Smart crop option 80% of y to the left of peak, 1% of y to the right of peak
+            'fit_start': '10',  # Start bin for fitting
+            'fit_end': '30',   # End bin for fitting These should be dynamically calculated based on the length of the time array, 10-100 assumes 128 bins
+            'smart_crop': 'False',  # Smart crop option 80% of y to the left of peak, 1% of y to the right of peak
         }
 
         self.entries = {} # dictionary to hold entry widgets, to access their values just call self.entries['label'].get() e.g label 'rho' will be self.entries['rho'].get()

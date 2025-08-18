@@ -21,6 +21,19 @@ from diffusion_equation.fit import convolve_irf_with_model
 from fitting_worker import FittingWorker
 from test_contini_model import GEOMETRY
 
+#TODO: indication for toggling measurement
+#TODO: another toggle button in graph frame
+#TODO: add an optino to cut off the x axis and y axis at certain ranges for a closer look at the data
+#TODO: drop down for geometry and phantom 
+#TODO: disable useless params in different modes
+#TODO: add log scale to both figures in cotini model panel and graph frame
+#TODO: show actual time using time step instead of time step integers
+#TODO: add noise window 
+#TODO: default to last 8% noise window percentage
+#TODO: markers on meas curve only
+#TODO: display all details of fit result in a label
+#TODO: disable graph normalization whenever log scale is used
+
 # -------------- TMF8828 Raspberry Pi Class --------------    
 class TMF8828RaspberryPiGUI:
     def __init__(self, root):
@@ -137,9 +150,15 @@ class TMF8828RaspberryPiGUI:
         phantom = settings['phantom']
         mua_independent = settings['mua_independent'].lower() == 'true'
         m = int(settings['m'])
+
         output = Contini1997([rho], t, s, mua, musp, n1, n2, phantom, mua_independent, m)["total"][0][0]
         model_conv = convolve_irf_with_model(self.contini_model_panel.irf, output, geometry=GEOMETRY.REFLECTANCE, offset=0, normalize_irf=True, normalize_model=True, denest_contini_output=False)
-        
+        # model_conv = model_conv(1:length(irf_bg_corrected));
+        xleft = 10
+        xright = 30
+        model_conv = model_conv/sum(model_conv[xleft:xright]); #xleft and xright are fitting window
+        # model_conv = model_conv*sum(meas_bg_corrected(xleft:xright)); 
+        arnorm_model_conv = model_conv*self.y_data[xleft:xright].sum()
 
         if self.save_fitting and self.file_path_var.get():
             #save raw model_conv to a csv file
@@ -153,10 +172,11 @@ class TMF8828RaspberryPiGUI:
         if self.use_log_scale.get():
             EPS = 1e-6
             model_conv = np.clip(model_conv, EPS, None)  # Avoid zero in log scale
-        self.model_line.set_ydata(model_conv)
+        self.model_line.set_ydata(arnorm_model_conv)
 
         if len(model_conv) == len(self.y_data):
-            residual = self.y_data - model_conv
+            # residual = (self.y_data[xleft:xright] - arnorm_model_conv[xleft:xright])/np.sqrt(self.y_data[xleft:xright])
+            residual = (self.y_data - arnorm_model_conv)/np.sqrt(self.y_data)
             self.residual_line.set_ydata(residual)
             self.residual_ax.set_ylim(residual.min() * 1.1, residual.max() * 1.1)
         
@@ -173,8 +193,15 @@ class TMF8828RaspberryPiGUI:
                     # for bar, val in zip(self.bars, values): #this one is for bar graph
                     #     bar.set_height(val)
                     # self.ax.set_ylim(0, values.max() * 1.1)
+
                     if self.normalize_graph_output.get():  # Normalize if the option is selected
                         values = values / max(values) 
+
+                    # get rid of background
+                    bg = np.mean(values[100:120])
+                    values = values - bg
+
+
                     values[values <= 0] = self.EPS
                     self.y_data = values
                     self.line.set_ydata(self.y_data)
@@ -184,6 +211,10 @@ class TMF8828RaspberryPiGUI:
                         values = np.clip(values, EPS, None)  # Avoid zero in log scale
 
                     self._safe_adjust_ylim() 
+
+                    self.ax.set_xlim(0, 40)
+                    self.residual_ax.set_xlim(0, 40)
+
                     self.canvas.draw()
                 except Exception as e:
                     print(f"Error: {e}")
@@ -294,24 +325,28 @@ class TMF8828RaspberryPiGUI:
         self.canvas.draw_idle()
 
     def _safe_adjust_ylim(self):
-        EPS = 1e-6  # Small positive number
-        ymin = EPS if self.ax.get_yscale() == "log" else 0
+        EPS = 1e-6  # Small positive number for linear scale
+        # LOG_MIN = 1e-4  # Lower bound for log scale
+        LOG_MIN = 1  # Lower bound for log scale
+
+        ymin = LOG_MIN if self.ax.get_yscale() == "log" else 0
 
         # Measurement curve
-        y_max_meas = max(self.y_data.max(), EPS)
+        y_max_meas = max(self.y_data.max(), LOG_MIN if self.ax.get_yscale() == "log" else EPS)
         self.ax.set_ylim(ymin, y_max_meas * 1.1)
 
         # Residual plot
         y_resid = self.residual_line.get_ydata()
         if len(y_resid) > 0:
-            y_min_resid = min(y_resid.min(), -EPS)
-            y_max_resid = max(y_resid.max(), EPS)
+            y_min_resid = min(y_resid.min(), -(LOG_MIN if self.residual_ax.get_yscale() == "log" else EPS))
+            y_max_resid = max(y_resid.max(), LOG_MIN if self.residual_ax.get_yscale() == "log" else EPS)
             if self.residual_ax.get_yscale() == "log":
-                # Residuals can be negative, so for log scale we take absolute values
-                y_max_abs = max(abs(y_min_resid), abs(y_max_resid), EPS)
-                self.residual_ax.set_ylim(EPS, y_max_abs * 1.1)
+                # Residuals can be negative, so take absolute values
+                y_max_abs = max(abs(y_min_resid), abs(y_max_resid), LOG_MIN)
+                self.residual_ax.set_ylim(LOG_MIN, y_max_abs * 1.1)
             else:
                 self.residual_ax.set_ylim(y_min_resid * 1.1, y_max_resid * 1.1)
+
 
 
 
@@ -434,6 +469,10 @@ class TMF8828RaspberryPiGUI:
         self.save_meas_checkbox.grid(row=7, column=2, padx=5, pady=5)
         self.save_fit_checkbox = tk.Checkbutton(self.control_frame, text="Save Fitting Curve to CSV", bg="white", command=self.toggle_saving_fitting)
         self.save_fit_checkbox.grid(row=7, column=3, padx=5, pady=5)
+
+    def toggle_measurement(self):
+        """Toggle the measurement state."""
+        self.reader.toggle_measurement()
     
     def toggle_saving_fitting(self):
         """Toggle the saving of fitting data to a CSV file."""

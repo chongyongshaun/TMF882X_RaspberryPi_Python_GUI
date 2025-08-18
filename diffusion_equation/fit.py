@@ -55,6 +55,12 @@ def convolve_irf_with_model(irf, model, geometry=GEOMETRY.REFLECTANCE, offset=0,
     # check if irf and model have the same dimensions
     if len(irf) != len(model):
         raise ValueError(f"IRF and model must have the same length. IRF length: {len(irf)}, model length: {len(model)}")
+    
+    # % area normalization (below)
+    # ci_arnorm = ci_arnorm(1:length(irf_bg_corrected));
+    # ci_offset_n = ci_arnorm./sum(ci_arnorm(xleft:xright));
+    # ci_offset_n = ci_offset_n.*sum(meas_bg_corrected(xleft:xright)); 
+
     if normalize_irf:
         irf = irf / np.max(irf)
     if normalize_model:
@@ -235,8 +241,10 @@ def fit_least_squares(
     y, irf = preprocess(
         meas,
         irf=irf,
-        meas_noise_win=(0, noise_win_len),
-        irf_noise_win=(0, noise_win_len),
+        meas_noise_win=(100, 120),
+        irf_noise_win=(100, 120),
+        # meas_noise_win=(0, noise_win_len),
+        # irf_noise_win=(0, noise_win_len),
         meas_roi=meas_roi,
         irf_roi=irf_roi,
         meas_avg_w=meas_avg_w,
@@ -270,9 +278,11 @@ def fit_least_squares(
             smart_crop=smart_crop
         ),
         x0,
-        method='lm',
+        method='trf',
+        # method='lm',
         args=(u, y),
-        verbose=verbose
+        verbose=verbose,
+        bounds=([0, 0.1], [1000, 1000]) # Set bounds for mua and musp
     )
 
     print(f"Fit result: mua = {fit.x[0]:.5e}, musp = {fit.x[1]:.5e}")
