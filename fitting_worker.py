@@ -55,6 +55,21 @@ class FittingWorker(threading.Thread):
 
             time.sleep(self.interval)
 
+    def parse_window(self, window_str):
+        try:
+            # Convert string to a tuple
+            window = eval(window_str)
+            
+            # Check it's a tuple of length 2
+            if isinstance(window, tuple) and len(window) == 2:
+                a, b = window
+                # Check both are integers and in ascending order
+                if isinstance(a, int) and isinstance(b, int) and a < b:
+                    return window
+        except Exception:
+            pass  # Any error, just return None
+        
+        return None
 
     def perform_fit(self, measured_data, settings, irf):
         """
@@ -69,6 +84,9 @@ class FittingWorker(threading.Thread):
         phantom = settings['phantom']
         mua_independent = settings['mua_independent'].lower() == 'true'
         m = int(settings['m'])
+        smart_crop = settings['smart_crop'].lower() == 'true'
+        irf_noise_win = self.parse_window(settings['irf_noise_win'])
+        meas_noise_win = self.parse_window(settings['meas_noise_win'])
         res = fit_least_squares(
             x0,
             measured_data,
@@ -85,10 +103,11 @@ class FittingWorker(threading.Thread):
             fit_start=None,
             fit_end=None,
             verbose=1,
-            # smart_crop=True
+            meas_noise_win=meas_noise_win,
+            irf_noise_win=irf_noise_win,
+            smart_crop=smart_crop
         )
-        mua, musp = res[0], res[1]
-        return {"mua": mua, "musp": musp}
+        return {"mua": res.x[0], "musp": res.x[1], "cost": res.cost, "iterations": res.njev, "gradient": res.grad, "optimality": res.optimality}
 
     def toggle_filter_largest_peak(self):
         """

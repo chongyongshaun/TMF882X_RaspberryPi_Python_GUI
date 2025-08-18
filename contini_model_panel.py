@@ -51,6 +51,8 @@ class ContiniModelPanel:
             'fit_start': '10',  # Start bin for fitting
             'fit_end': '30',   # End bin for fitting These should be dynamically calculated based on the length of the time array, 10-100 assumes 128 bins
             'smart_crop': 'False',  # Smart crop option 80% of y to the left of peak, 1% of y to the right of peak
+            'meas_noise_win': '(100,120)', 
+            'irf_noise_win': '(100,120)',  
         }
 
         self.entries = {} # dictionary to hold entry widgets, to access their values just call self.entries['label'].get() e.g label 'rho' will be self.entries['rho'].get()
@@ -66,10 +68,14 @@ class ContiniModelPanel:
         self.compute_convolution_button.grid(row=len(self.params), column=1, columnspan=1, pady=10)
 
         load_irf_button = ttk.Button(self.input_frame, text="Load IRF from CSV", command=self.load_irf)
-        load_irf_button.grid(row=len(self.params)+1, column=0, columnspan=2, pady=10)
+        load_irf_button.grid(row=len(self.params)+1, column=0, columnspan=1, pady=10)
+
+        self.y_scale = "linear"
+        self.toggle_scale_button = ttk.Button(self.input_frame, text="Toggle Y Scale (Linear/Log)", command=self.toggle_y_scale)
+        self.toggle_scale_button.grid(row=len(self.params)+1, column=1, columnspan=1, pady=10)
 
         self.apply_settings_button = ttk.Button(self.input_frame, text="Apply Settings", command=self.apply_settings)
-        self.apply_settings_button.grid(row=len(self.params)+2, column=0, columnspan=2, pady=10)
+        self.apply_settings_button.grid(row=len(self.params)+2, column=0, columnspan=1, pady=10)
 
     def create_widgets(self):
         # rho
@@ -129,11 +135,11 @@ class ContiniModelPanel:
         self.entries['n2 (diffusing n)'] = entry_n2
 
         # phantom
-        ttk.Label(self.input_frame, text="Phantom Type (slab or semiinf)").grid(row=8, column=0, sticky='w', padx=5, pady=5)
-        entry_phantom = ttk.Entry(self.input_frame)
-        entry_phantom.insert(0, self.params['phantom'])
-        entry_phantom.grid(row=8, column=1, padx=5, pady=5)
-        self.entries['phantom'] = entry_phantom
+        ttk.Label(self.input_frame, text="Phantom Type").grid(row=8, column=0, sticky='w', padx=5, pady=5)
+        phantom_combo = ttk.Combobox(self.input_frame, values=["slab", "semiinf"], state="readonly")
+        phantom_combo.set(self.params['phantom'])  # default
+        phantom_combo.grid(row=8, column=1, padx=5, pady=5)
+        self.entries['phantom'] = phantom_combo
 
         # mua_independent
         ttk.Label(self.input_frame, text="Mua Independent? (True or False)").grid(row=9, column=0, sticky='w', padx=5, pady=5)
@@ -150,11 +156,12 @@ class ContiniModelPanel:
         self.entries['m (num imaginary sources)'] = entry_m
 
         # geometry
-        ttk.Label(self.input_frame, text="Measurement Geometry (see GEOMETRY)").grid(row=11, column=0, sticky='w', padx=5, pady=5)
-        entry_geometry = ttk.Entry(self.input_frame)
-        entry_geometry.insert(0, self.params['geometry'])
-        entry_geometry.grid(row=11, column=1, padx=5, pady=5)
-        self.entries['geometry'] = entry_geometry
+        ttk.Label(self.input_frame, text="Measurement Geometry").grid(row=11, column=0, sticky='w', padx=5, pady=5)
+        geom_combo = ttk.Combobox(self.input_frame, values=["REFLECTANCE", "TRANSMITTANCE"], state="readonly")
+        # Store it as string, you can later map it back to GEOMETRY enum
+        geom_combo.set("REFLECTANCE" if self.params['geometry'] == GEOMETRY.REFLECTANCE else "TRANSMITTANCE")
+        geom_combo.grid(row=11, column=1, padx=5, pady=5)
+        self.entries['geometry'] = geom_combo
 
         # fit_start
         ttk.Label(self.input_frame, text="Fit Start Bin (auto, or insert number)").grid(row=12, column=0, sticky='w', padx=5, pady=5)
@@ -187,6 +194,33 @@ class ContiniModelPanel:
         entry_smart_crop.grid(row=14, column=1, padx=5, pady=5)
         self.entries['smart_crop'] = entry_smart_crop
 
+        # irf noise window
+        ttk.Label(self.input_frame, text="IRF Noise Window (start,end)").grid(row=15, column=0, sticky='w', padx=5, pady=5)
+        entry_irf_noise = ttk.Entry(self.input_frame)
+        entry_irf_noise.insert(0, self.params['irf_noise_win'])
+        entry_irf_noise.grid(row=15, column=1, padx=5, pady=5)
+        self.entries['irf_noise_win'] = entry_irf_noise
+
+        # meas noise window
+        ttk.Label(self.input_frame, text="Measurement Noise Window (start,end)").grid(row=16, column=0, sticky='w', padx=5, pady=5)
+        entry_meas_noise = ttk.Entry(self.input_frame)
+        entry_meas_noise.insert(0, self.params['meas_noise_win'])
+        entry_meas_noise.grid(row=16, column=1, padx=5, pady=5)
+        self.entries['meas_noise_win'] = entry_meas_noise
+
+        # --- add phantom type callback ---
+        def on_phantom_change(event=None):
+            phantom = phantom_combo.get().lower()
+            if phantom == "semiinf":
+                entry_s.config(state="disabled")
+                entry_m.config(state="disabled")
+            else:
+                entry_s.config(state="normal")
+                entry_m.config(state="normal")
+
+        phantom_combo.bind("<<ComboboxSelected>>", on_phantom_change)
+        on_phantom_change()  # call once to apply at startup
+
         # Add a checkbox for "Save to CSV"
         self.save_to_csv = tk.BooleanVar(value=False)
         save_csv_checkbox = ttk.Checkbutton(
@@ -194,7 +228,8 @@ class ContiniModelPanel:
             text="Save to CSV",
             variable=self.save_to_csv
         )
-        save_csv_checkbox.grid(row=15, column=1, columnspan=2, sticky='w', padx=5, pady=5)
+        save_csv_checkbox.grid(row=17, column=1, columnspan=2, sticky='w', padx=5, pady=5)
+
 
     def _create_plot_frame(self, parent, title):
         """Create a labeled frame with an embedded empty matplotlib plot."""
@@ -214,6 +249,22 @@ class ContiniModelPanel:
 
         return ax, canvas
 
+    def toggle_y_scale(self):
+        """Toggle y-axis between linear and log for all 3 plots."""
+        self.y_scale = "log" if self.y_scale == "linear" else "linear"
+
+        # Apply to all three axes
+        for ax, canvas in [(self.irf_ax, self.irf_canvas),
+                        (self.contini_ax, self.contini_canvas),
+                        (self.convolved_ax, self.convolved_canvas)]:
+            ax.set_yscale(self.y_scale)
+            # prevent errors if log and no positive values
+            ymin, ymax = ax.get_ylim()
+            if self.y_scale == "log":
+                if ymin <= 0:
+                    ymin = 1e-4
+                ax.set_ylim(bottom=ymin, top=ymax)
+            canvas.draw()
 
     #getters for settings and the computed results as well as irf
     def get_settings(self):

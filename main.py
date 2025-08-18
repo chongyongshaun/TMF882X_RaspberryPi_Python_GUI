@@ -21,19 +21,6 @@ from diffusion_equation.fit import convolve_irf_with_model
 from fitting_worker import FittingWorker
 from test_contini_model import GEOMETRY
 
-#TODO: indication for toggling measurement
-#TODO: another toggle button in graph frame
-#TODO: add an optino to cut off the x axis and y axis at certain ranges for a closer look at the data
-#TODO: drop down for geometry and phantom 
-#TODO: disable useless params in different modes
-#TODO: add log scale to both figures in cotini model panel and graph frame
-#TODO: show actual time using time step instead of time step integers
-#TODO: add noise window 
-#TODO: default to last 8% noise window percentage
-#TODO: markers on meas curve only
-#TODO: display all details of fit result in a label
-#TODO: disable graph normalization whenever log scale is used
-
 # -------------- TMF8828 Raspberry Pi Class --------------    
 class TMF8828RaspberryPiGUI:
     def __init__(self, root):
@@ -65,15 +52,15 @@ class TMF8828RaspberryPiGUI:
         
         #options:
         self.save_fitting = False
-        self.normalize_graph_output = tk.BooleanVar(value=True)  # Default to True 
+        self.normalize_graph_output = tk.BooleanVar(value=False)
         self.EPS = 1e-6  # small positive number
 
         # top left corner
         self.model_frame = tk.LabelFrame(self.left_frame, text="Model", padx=5, pady=5, bg="white")
-        self.model_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.model_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
         # bottom left corner
         self.control_frame = tk.LabelFrame(self.left_frame, text="Control Panel", padx=5, pady=5, bg="white")
-        self.control_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.control_frame.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
         # top right corner
         self.graph_frame = tk.LabelFrame(self.right_frame, text="Graph", padx=5, pady=5, bg="white")
         self.graph_frame.pack(fill="both", expand=True, padx=5, pady=5)
@@ -97,6 +84,8 @@ class TMF8828RaspberryPiGUI:
         self.x_data = np.arange(128)
         self.y_data = np.zeros(128)
         self.line, = self.ax.plot(self.x_data, self.y_data, color='blue', label='Measurement Curve')
+        self.line.set_marker('o')
+        self.line.set_markersize(4)
         self.model_line, = self.ax.plot(self.x_data, np.zeros_like(self.x_data), color='red', linestyle='--', label='Fitted Model')
         self.ax.legend()
         self.ax.set_ylim(0, 100)
@@ -134,10 +123,9 @@ class TMF8828RaspberryPiGUI:
 
     #callback function for FittingWorker, if you want to do something with the fit result this function will be called whenever a fit result is available
     def handle_fit_result(self, fit_result): 
-
         print("Live Fit Result:", fit_result) 
         # update the fit result label
-        self.fit_result_var.set(f"Fit Result: μa: {fit_result['mua']:.4f}, μs': {fit_result['musp']:.4f}")
+        self.fit_result_var.set(f"Fit Result: μa: {fit_result['mua']:.4f}, μs': {fit_result['musp']:.4f}, Cost: {fit_result['cost']:.4f}, Iterations: {fit_result['iterations']}\n Gradient: {fit_result['gradient']}, Optimality: {fit_result['optimality']}")
 
         # create the fitting curve using the model
         mua, musp = fit_result["mua"], fit_result["musp"]
@@ -212,9 +200,6 @@ class TMF8828RaspberryPiGUI:
 
                     self._safe_adjust_ylim() 
 
-                    self.ax.set_xlim(0, 40)
-                    self.residual_ax.set_xlim(0, 40)
-
                     self.canvas.draw()
                 except Exception as e:
                     print(f"Error: {e}")
@@ -278,9 +263,9 @@ class TMF8828RaspberryPiGUI:
     def build_graph_frame_misc(self):
         # Create a StringVar to hold the dynamic text
         self.fit_result_var = tk.StringVar()
-        self.fit_result_var.set("Fit Result: μa: ---, μs': ---")
+        self.fit_result_var.set("Fit Result: N/A")  # Initial value
         # Label bound to the StringVar
-        fit_label = tk.Label(self.graph_frame, textvariable=self.fit_result_var, font=("Arial", 14))
+        fit_label = tk.Label(self.graph_frame, textvariable=self.fit_result_var, font=("Arial", 12))
         fit_label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
 
         plotting_options_frame = tk.LabelFrame(self.graph_frame, text="Plotting Options", padx=5, pady=5, bg="white")
@@ -309,7 +294,69 @@ class TMF8828RaspberryPiGUI:
             bg="white",
             command=self.toggle_log_scale
         )
-        log_checkbox.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        log_checkbox.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        self.toggle_measurement_button_graph_frame = tk.Button(plotting_options_frame, text="Stop Measurement", command=self.toggle_measurement, state=tk.DISABLED)
+        self.toggle_measurement_button_graph_frame.grid(row=3, column=0, padx=5, pady=5, sticky="w")
+
+        # Inside build_graph_frame_misc or a new control frame
+        x_axis_frame = tk.LabelFrame(self.graph_frame, text="X-Axis Range", padx=5, pady=5, bg="white")
+        x_axis_frame.grid(row=4, column=1, padx=5, pady=5, sticky="w")
+
+        NUM_BINS = 128  # Assuming 128 bins as per the original code
+        self.xmin_var = tk.IntVar(value=0)
+        self.xmax_var = tk.IntVar(value=NUM_BINS-1)
+
+        tk.Label(x_axis_frame, text="Min:", bg="white").grid(row=0, column=0, sticky="w")
+        tk.Scale(x_axis_frame, from_=0, to=(NUM_BINS-1), orient="horizontal",
+                variable=self.xmin_var, command=lambda e: self.update_x_axis()).grid(row=0, column=1)
+
+        tk.Label(x_axis_frame, text="Max:", bg="white").grid(row=1, column=0, sticky="w")
+        tk.Scale(x_axis_frame, from_=0, to=(NUM_BINS-1), orient="horizontal",
+                variable=self.xmax_var, command=lambda e: self.update_x_axis()).grid(row=1, column=1)
+        
+        self.use_actual_time = tk.BooleanVar(value=False)
+
+        time_checkbox = tk.Checkbutton(
+            plotting_options_frame,
+            text="Use Actual Time (ns)",
+            variable=self.use_actual_time,
+            bg="white",
+            command=self.update_x_labels
+        )
+        time_checkbox.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+
+    def update_x_labels(self):
+        """Toggle between bin index and actual time (ns) on the x-axis."""
+        time_step_ns = float(self.contini_model_panel.get_settings()['time_step (ns)'])
+        if self.use_actual_time.get():
+            # Convert bins to time units
+            bin_ticks = self.ax.get_xticks()
+            time_ticks = bin_ticks * time_step_ns
+            self.ax.set_xticklabels([f"{t:.1f}" for t in time_ticks])
+
+            resid_ticks = self.residual_ax.get_xticks()
+            time_ticks_resid = resid_ticks * time_step_ns
+            self.residual_ax.set_xticklabels([f"{t:.1f}" for t in time_ticks_resid])
+
+            self.ax.set_xlabel("Time (ns)")
+            self.residual_ax.set_xlabel("Time (ns)")
+        else:
+            self.ax.set_xlabel("Time Bins")
+            self.residual_ax.set_xlabel("Time Bins")
+            self.ax.set_xticks(np.linspace(0, 127, num=8))
+            self.ax.set_xticklabels([str(int(x)) for x in np.linspace(0, 127, num=8)])
+            self.residual_ax.set_xticks(np.linspace(0, 127, num=8))
+            self.residual_ax.set_xticklabels([str(int(x)) for x in np.linspace(0, 127, num=8)])
+
+        self.canvas.draw_idle()
+
+
+    def update_x_axis(self):
+        xmin, xmax = self.xmin_var.get(), self.xmax_var.get()
+        if xmin < xmax:  # Prevent invalid ranges
+            self.ax.set_xlim(xmin, xmax)
+            self.residual_ax.set_xlim(xmin, xmax)
+            self.canvas.draw_idle()
 
 
     def toggle_log_scale(self):
@@ -317,6 +364,7 @@ class TMF8828RaspberryPiGUI:
         if self.use_log_scale.get():
             self.ax.set_yscale("log")
             self.residual_ax.set_yscale("log")
+            self.normalize_graph_output.set(False)  # Disable normalization when using log scale
         else:
             self.ax.set_yscale("linear")
             self.residual_ax.set_yscale("linear")
@@ -445,7 +493,7 @@ class TMF8828RaspberryPiGUI:
         # ROW 6: Start Reader and Toggle Measurement buttons and take one measurement button
         self.start_reader_button = tk.Button(self.control_frame, text="Connect", command=self.start_reader)
         self.start_reader_button.grid(row=6, column=0, padx=5, pady=5)   
-        self.toggle_measurement_button = tk.Button(self.control_frame, text="Toggle Measurement", command=self.reader.toggle_measurement, state=tk.DISABLED)
+        self.toggle_measurement_button = tk.Button(self.control_frame, text="Stop Measurement", command=self.toggle_measurement, state=tk.DISABLED)
         self.toggle_measurement_button.grid(row=6, column=1, padx=5, pady=5)
         tk.Button(self.control_frame, text="Start Live Fitting", command=self.start_fitting_worker).grid(row=6, column=2, padx=5, pady=5)
 
@@ -472,6 +520,14 @@ class TMF8828RaspberryPiGUI:
 
     def toggle_measurement(self):
         """Toggle the measurement state."""
+        if self.toggle_measurement_button['text'] == "Toggle Measurement":
+            self.toggle_measurement_button.config(text="Stop Measurement")
+            self.toggle_measurement_button_graph_frame.config(text="Stop Measurement")
+            print("Measurement started.")
+        else:
+            self.toggle_measurement_button.config(text="Toggle Measurement")
+            self.toggle_measurement_button_graph_frame.config(text="Toggle Measurement")    
+            print("Measurement stopped.")
         self.reader.toggle_measurement()
     
     def toggle_saving_fitting(self):
@@ -488,6 +544,7 @@ class TMF8828RaspberryPiGUI:
             self.reader.start()
             self.start_reader_button.config(state=tk.DISABLED)
             self.toggle_measurement_button.config(state=tk.NORMAL)
+            self.toggle_measurement_button_graph_frame.config(state=tk.NORMAL)
 
     def select_file(self):
         file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])

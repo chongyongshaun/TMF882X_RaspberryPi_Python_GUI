@@ -222,15 +222,17 @@ def fit_least_squares(
     :param irf: Instrument response function (1D list or array)
     :param time_step_ns: Time step between histogram bins in nanoseconds
     :param Other params: Passed to `fun_residual` and `model`
-    :return: Optimized [mua, musp] as `res.x`
+    :return: res, to get mua and musp, use res.x[0] and res.x[1]
     """
     # Step 1: Convert to NumPy arrays
     meas = np.array(meas)
     irf = np.array(irf)
 
     if meas_noise_win is None or irf_noise_win is None:
-        noise_win_percent = 0.08  # Use first 8% of the curve for noise window
+        noise_win_percent = 0.08  # Use last 8% of the curve for noise window
         noise_win_len = int(len(meas) * noise_win_percent)
+        meas_noise_win = (len(meas) - noise_win_len, len(meas))
+        irf_noise_win = (len(irf) - noise_win_len, len(irf))
 
     if meas_roi is None or irf_roi is None:
         roi = (0, len(meas))
@@ -241,10 +243,8 @@ def fit_least_squares(
     y, irf = preprocess(
         meas,
         irf=irf,
-        meas_noise_win=(100, 120),
-        irf_noise_win=(100, 120),
-        # meas_noise_win=(0, noise_win_len),
-        # irf_noise_win=(0, noise_win_len),
+        meas_noise_win=meas_noise_win,
+        irf_noise_win=irf_noise_win,
         meas_roi=meas_roi,
         irf_roi=irf_roi,
         meas_avg_w=meas_avg_w,
@@ -286,7 +286,7 @@ def fit_least_squares(
     )
 
     print(f"Fit result: mua = {fit.x[0]:.5e}, musp = {fit.x[1]:.5e}")
-    return fit.x
+    return fit
 
 # #commenting this out as idk how Data works ngl
 # def fit_from_variables(vs):
