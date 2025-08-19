@@ -156,38 +156,56 @@ def slidingavg(vector, N):
     return (cumsum[N:] - cumsum[:-N]) / float(N)
 
 # TODO: preprocess measured data separately. reuse preprocessed irf curves
-def preprocess(measured, irf, meas_noise_win=(1,1), irf_noise_win=(1,1), meas_roi=(1,1), irf_roi=(1,1), meas_avg_w=1, irf_avg_w=1):
+def preprocess(
+    measured, irf,
+    meas_noise_win=(1,1), irf_noise_win=(1,1),
+    meas_roi=(1,1), irf_roi=(1,1),
+    meas_avg_w=1, irf_avg_w=1,
+    normalization="none"  # "none", "peak", "area"
+):
     """
-    Preprocess measured and irf curves by removing background and performing a sliding average
-    :param measured: numpy array containing measured data
-    :param irf: numpy array containing irf data
-    :param noise_window: region containing largely noise, used for calculating background value
-    :param average_width: width of sliding average window
+    Preprocess measured and irf curves:
+    - background subtraction
+    - ROI masking
+    - optional normalization (none, peak, area)
     """
     bg = (
-            np.mean(irf[irf_noise_win[0]:irf_noise_win[1]]),
-            np.mean(measured[meas_noise_win[0]:meas_noise_win[1]])
-        )
+        np.mean(irf[irf_noise_win[0]:irf_noise_win[1]]),
+        np.mean(measured[meas_noise_win[0]:meas_noise_win[1]])
+    )
 
-    # Remove background from irf and measured data
+    # Remove background
     irf_bg = irf - bg[0]
     meas_bg = measured - bg[1]
 
+    # # perform sliding average
     # irf_avg = slidingavg(irf_bg, irf_avg_w)
     # irf_bg_corrected = irf_avg/max(irf_avg)
     # meas_avg_bg = slidingavg(meas_bg, meas_avg_w)
     # meas_bg_corrected = meas_avg_bg/max(meas_avg_bg) #Get rid of sliding average for now
 
-    #Normalize the background-corrected curves
-    irf_bg_corrected = irf_bg / np.max(irf_bg)  
-    meas_bg_corrected = meas_bg / np.max(meas_bg)  
+    # ROI mask
+    irf_bg[:irf_roi[0]] = 0
+    irf_bg[irf_roi[1]:] = 0
+    meas_bg[:meas_roi[0]] = 0
+    meas_bg[meas_roi[1]:] = 0
 
-    irf_bg_corrected[:irf_roi[0]] = 0
-    irf_bg_corrected[irf_roi[1]:] = 0
-    meas_bg_corrected[:meas_roi[0]] = 0
-    meas_bg_corrected[meas_roi[1]:] = 0
+    # ----- Normalization logic -----
+    EPS = 1e-12
+    if normalization.lower() == "peak":
+        irf_bg = irf_bg / max(np.max(irf_bg), EPS)
+        meas_bg = meas_bg / max(np.max(meas_bg), EPS)
 
-    return (meas_bg_corrected, irf_bg_corrected)
+    elif normalization.lower() == "area":
+        irf_area = max(np.sum(irf_bg[irf_roi[0]:irf_roi[1]]), EPS)
+        meas_area = max(np.sum(meas_bg[meas_roi[0]:meas_roi[1]]), EPS)
+        irf_bg = irf_bg / irf_area * meas_area
+        meas_bg = meas_bg / meas_area * meas_area  # → normalize to 1 area
+
+    # else "none" → just return bg-subtracted
+
+    return meas_bg, irf_bg
+
 
 def fit_least_squares(
     x0,
@@ -212,7 +230,8 @@ def fit_least_squares(
     fit_start=None,
     fit_end=None,
     verbose=1,
-    smart_crop=False
+    smart_crop=False,
+    normalization="none"
 ):
     """
     Fit measurement values to a convolutional diffusion model using least squares.
@@ -248,7 +267,8 @@ def fit_least_squares(
         meas_roi=meas_roi,
         irf_roi=irf_roi,
         meas_avg_w=meas_avg_w,
-        irf_avg_w=irf_avg_w
+        irf_avg_w=irf_avg_w,
+        normalization=normalization
     )
 
     # Remove negative values by setting them to zero

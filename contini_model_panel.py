@@ -49,10 +49,11 @@ class ContiniModelPanel:
             'geometry': GEOMETRY.REFLECTANCE,  # Measurement geometry
             't' : None, # this is calculated from time_step and num_bins
             'fit_start': '10',  # Start bin for fitting
-            'fit_end': '30',   # End bin for fitting These should be dynamically calculated based on the length of the time array, 10-100 assumes 128 bins
+            'fit_end': '80',   # End bin for fitting These should be dynamically calculated based on the length of the time array, 10-100 assumes 128 bins
             'smart_crop': 'False',  # Smart crop option 80% of y to the left of peak, 1% of y to the right of peak
             'meas_noise_win': '(100,120)', 
-            'irf_noise_win': '(100,120)',  
+            'irf_noise_win': '(100,120)', 
+            "normalization": "area"
         }
 
         self.entries = {} # dictionary to hold entry widgets, to access their values just call self.entries['label'].get() e.g label 'rho' will be self.entries['rho'].get()
@@ -157,11 +158,11 @@ class ContiniModelPanel:
 
         # geometry
         ttk.Label(self.input_frame, text="Measurement Geometry").grid(row=11, column=0, sticky='w', padx=5, pady=5)
-        geom_combo = ttk.Combobox(self.input_frame, values=["REFLECTANCE", "TRANSMITTANCE"], state="readonly")
+        gnorm_combo = ttk.Combobox(self.input_frame, values=["REFLECTANCE", "TRANSMITTANCE"], state="readonly")
         # Store it as string, you can later map it back to GEOMETRY enum
-        geom_combo.set("REFLECTANCE" if self.params['geometry'] == GEOMETRY.REFLECTANCE else "TRANSMITTANCE")
-        geom_combo.grid(row=11, column=1, padx=5, pady=5)
-        self.entries['geometry'] = geom_combo
+        gnorm_combo.set("REFLECTANCE" if self.params['geometry'] == GEOMETRY.REFLECTANCE else "TRANSMITTANCE")
+        gnorm_combo.grid(row=11, column=1, padx=5, pady=5)
+        self.entries['geometry'] = gnorm_combo
 
         # fit_start
         ttk.Label(self.input_frame, text="Fit Start Bin (auto, or insert number)").grid(row=12, column=0, sticky='w', padx=5, pady=5)
@@ -208,6 +209,13 @@ class ContiniModelPanel:
         entry_meas_noise.grid(row=16, column=1, padx=5, pady=5)
         self.entries['meas_noise_win'] = entry_meas_noise
 
+        # normalization
+        ttk.Label(self.input_frame, text="Normalization").grid(row=17, column=0, sticky='w', padx=5, pady=5)
+        phantom_combo = ttk.Combobox(self.input_frame, values=["none", "peak", "area"], state="readonly")
+        phantom_combo.set(self.params['normalization'])  # default
+        phantom_combo.grid(row=17, column=1, padx=5, pady=5)
+        self.entries['normalization'] = phantom_combo
+
         # --- add phantom type callback ---
         def on_phantom_change(event=None):
             phantom = phantom_combo.get().lower()
@@ -228,7 +236,7 @@ class ContiniModelPanel:
             text="Save to CSV",
             variable=self.save_to_csv
         )
-        save_csv_checkbox.grid(row=17, column=1, columnspan=2, sticky='w', padx=5, pady=5)
+        save_csv_checkbox.grid(row=18, column=1, columnspan=2, sticky='w', padx=5, pady=5)
 
 
     def _create_plot_frame(self, parent, title):

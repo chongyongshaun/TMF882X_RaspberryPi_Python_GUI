@@ -64,6 +64,22 @@ def subtract_background(intensities, fraction=0.08):
     corrected[corrected < 0] = 0
     return corrected
 
+def peak_normalize(curve):
+    """Normalize curve by its peak value."""
+    EPS = 1e-12
+    return curve / max(curve.max(), EPS)
+
+def area_normalize(model_curve, meas_curve, xleft, xright):
+    """
+    Normalize model curve so its area matches the measurement curve in [xleft:xright].
+    """
+    EPS = 1e-12
+    model_area = model_curve[xleft:xright].sum()
+    meas_area = meas_curve[xleft:xright].sum()
+    if model_area < EPS:
+        return model_curve  # avoid divide by zero
+    return (model_curve / model_area) * meas_area
+
 if __name__ == "__main__":
     # Data
     data_strings = [

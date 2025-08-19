@@ -75,7 +75,10 @@ class FittingWorker(threading.Thread):
         """
         fitting logic
         """
-        x0 = np.array([0.025, 2])
+        mua = float(settings['mua'])
+        musp = float(settings['musp'])
+        x0 = np.array([mua, musp]) # use mua and musp as initial guess
+
         rho = float(settings['rho'])
         t = settings['t']
         s = float(settings['s'])
@@ -87,6 +90,7 @@ class FittingWorker(threading.Thread):
         smart_crop = settings['smart_crop'].lower() == 'true'
         irf_noise_win = self.parse_window(settings['irf_noise_win'])
         meas_noise_win = self.parse_window(settings['meas_noise_win'])
+        normalization = settings['normalization'].lower()
         res = fit_least_squares(
             x0,
             measured_data,
@@ -105,7 +109,8 @@ class FittingWorker(threading.Thread):
             verbose=1,
             meas_noise_win=meas_noise_win,
             irf_noise_win=irf_noise_win,
-            smart_crop=smart_crop
+            smart_crop=smart_crop,
+            normalization=normalization
         )
         return {"mua": res.x[0], "musp": res.x[1], "cost": res.cost, "iterations": res.njev, "gradient": res.grad, "optimality": res.optimality}
 

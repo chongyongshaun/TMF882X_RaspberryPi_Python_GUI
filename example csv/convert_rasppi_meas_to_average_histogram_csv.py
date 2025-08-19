@@ -1,11 +1,11 @@
 import numpy as np
 
-filename = 'irf_2.csv'  # replace with your actual file path
+filename = 'irf_170K.csv'  # replace with your actual file path
 
 with open(filename, 'r') as file:
-    # Skip the first 37 lines
-    for _ in range(37):
-        next(file)
+    # # Skip the first 37 lines
+    # for _ in range(37):
+    #     next(file)
     for line in file:
         if line.startswith('#HLONG'):
             parts = line.strip().split(';')
