@@ -617,11 +617,13 @@ class TMF8828RaspberryPiGUI:
         tk.Label(self.control_frame, text="Take N measurements:", bg="white").grid(row=6, column=3, sticky="w")
         self.n_measurements_var = tk.IntVar(value=1)
         tk.Entry(self.control_frame, textvariable=self.n_measurements_var, width=5).grid(row=6, column=4)
-        tk.Button(
+        self.take_n_btn = tk.Button(
             self.control_frame,
             text="Take N",
             command=lambda: self.reader.take_n_measurements(self.n_measurements_var.get())
-        ).grid(row=6, column=5, padx=5, pady=5)
+        )
+        self.take_n_btn.grid(row=6, column=5, padx=5, pady=5)
+        self.take_n_btn.config(state=tk.DISABLED)  # Initially disabled
 
         # ROW 7: File selection and saving options and start live fitting button
         self.file_path_var = tk.StringVar()
@@ -640,10 +642,12 @@ class TMF8828RaspberryPiGUI:
         if self.toggle_measurement_button['text'] == "Toggle Measurement":
             self.toggle_measurement_button.config(text="Stop Measurement")
             self.toggle_measurement_button_graph_frame.config(text="Stop Measurement")
+            self.take_n_btn.config(state=tk.DISABLED) 
             print("Measurement started.")
         else:
             self.toggle_measurement_button.config(text="Toggle Measurement")
-            self.toggle_measurement_button_graph_frame.config(text="Toggle Measurement")    
+            self.toggle_measurement_button_graph_frame.config(text="Toggle Measurement")   
+            self.take_n_btn.config(state=tk.NORMAL)
             print("Measurement stopped.")
         self.reader.toggle_measurement()
     
