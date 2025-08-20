@@ -77,7 +77,8 @@ class FittingWorker(threading.Thread):
         """
         mua = float(settings['mua'])
         musp = float(settings['musp'])
-        x0 = np.array([mua, musp]) # use mua and musp as initial guess
+        shift = int(settings['shift'])
+        x0 = np.array([mua, musp, shift]) # use mua and musp as initial guess
 
         rho = float(settings['rho'])
         t = settings['t']
@@ -91,6 +92,9 @@ class FittingWorker(threading.Thread):
         irf_noise_win = self.parse_window(settings['irf_noise_win'])
         meas_noise_win = self.parse_window(settings['meas_noise_win'])
         normalization = settings['normalization'].lower()
+        optimize_shift = settings['optimize_shift'].lower() == 'true'
+        interp_factor = int(settings['interp_factor'])
+
         res = fit_least_squares(
             x0,
             measured_data,
@@ -110,9 +114,11 @@ class FittingWorker(threading.Thread):
             meas_noise_win=meas_noise_win,
             irf_noise_win=irf_noise_win,
             smart_crop=smart_crop,
-            normalization=normalization
+            normalization=normalization,
+            optimize_shift=optimize_shift,
+            interp_factor=interp_factor
         )
-        return {"mua": res.x[0], "musp": res.x[1], "cost": res.cost, "iterations": res.njev, "gradient": res.grad, "optimality": res.optimality}
+        return {"mua": res.x[0], "musp": res.x[1], "shift": res.x[2], "cost": res.cost, "iterations": res.njev, "gradient": res.grad, "optimality": res.optimality}
 
     def toggle_filter_largest_peak(self):
         """

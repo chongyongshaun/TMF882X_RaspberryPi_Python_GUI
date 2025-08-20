@@ -33,7 +33,7 @@ class ContiniModelPanel:
         self.convolved_ax, self.convolved_canvas = self._create_plot_frame(self.plot_frame, "Convolved")
 
         self.params = {
-            'rho': '5',
+            'rho': '15',
             # 'time_step (ns)': '0.004', #4e-12
             # 'num_bins': '4096',
             'time_step (ns)': '0.38',
@@ -53,7 +53,10 @@ class ContiniModelPanel:
             'smart_crop': 'False',  # Smart crop option 80% of y to the left of peak, 1% of y to the right of peak
             'meas_noise_win': '(100,120)', 
             'irf_noise_win': '(100,120)', 
-            "normalization": "area"
+            "normalization": "area",
+            "shift" : "0",
+            "optimize_shift": "True",  # whether to optimize the shift parameter
+            "interp_factor": "1"  # interpolation factor for the model
         }
 
         self.entries = {} # dictionary to hold entry widgets, to access their values just call self.entries['label'].get() e.g label 'rho' will be self.entries['rho'].get()
@@ -216,6 +219,24 @@ class ContiniModelPanel:
         phantom_combo.grid(row=17, column=1, padx=5, pady=5)
         self.entries['normalization'] = phantom_combo
 
+        ttk.Label(self.input_frame, text="Number of bin shift").grid(row=18, column=0, sticky='w', padx=5, pady=5)
+        entry_shift = ttk.Entry(self.input_frame)
+        entry_shift.insert(0, self.params['shift'])
+        entry_shift.grid(row=18, column=1, padx=5, pady=5)
+        self.entries['shift'] = entry_shift
+
+        ttk.Label(self.input_frame, text="Optimize Shift (True or False)").grid(row=19, column=0, sticky='w', padx=5, pady=5)
+        entry_optimize_shift = ttk.Entry(self.input_frame)
+        entry_optimize_shift.insert(0, self.params['optimize_shift'])
+        entry_optimize_shift.grid(row=19, column=1, padx=5, pady=5)
+        self.entries['optimize_shift'] = entry_optimize_shift
+
+        ttk.Label(self.input_frame, text="Interpolation Factor").grid(row=20, column=0, sticky='w', padx=5, pady=5)
+        entry_interp_factor = ttk.Entry(self.input_frame)
+        entry_interp_factor.insert(0, self.params['interp_factor'])
+        entry_interp_factor.grid(row=20, column=1, padx=5, pady=5)
+        self.entries['interp_factor'] = entry_interp_factor
+
         # --- add phantom type callback ---
         def on_phantom_change(event=None):
             phantom = phantom_combo.get().lower()
@@ -236,7 +257,7 @@ class ContiniModelPanel:
             text="Save to CSV",
             variable=self.save_to_csv
         )
-        save_csv_checkbox.grid(row=18, column=1, columnspan=2, sticky='w', padx=5, pady=5)
+        save_csv_checkbox.grid(row=21, column=1, columnspan=2, sticky='w', padx=5, pady=5)
 
 
     def _create_plot_frame(self, parent, title):

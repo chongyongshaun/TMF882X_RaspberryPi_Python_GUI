@@ -33,7 +33,7 @@ def model(irf,rho,time,s,mua,musp,n1,n2,phantom,mua_independent,m, geometry=GEOM
 
     # ret = np.pad(np.convolve(theoretical['total'][int(geometry)][0], irf), (offset,0)) 
     ret = np.pad(scipy.signal.fftconvolve(theoretical['total'][int(geometry)][0], irf), (offset,0))
-
+    ret = ret[:len(irf)]
     max_val = np.max(ret)
     if max_val > 0:
         return ret / max_val
@@ -71,51 +71,57 @@ def convolve_irf_with_model(irf, model, geometry=GEOMETRY.REFLECTANCE, offset=0,
     return res
 
 #TODO: add an option to only take the main curve, meaning, assuming normalized, peak of the curve for model and measured data should be 1, to the left of peak, cut off when y = 0.8, to the right of the peak, cut off when y=0.01 before taking the residual 
-def fun_residual(x, time, irf, measured, rho=0, n1=1,n2=1.4, fit_start=0, fit_end=-1, mua_independent=True, phantom='semiinf',s=0, m=0, offset=0, geometry=GEOMETRY.TRANSMITTANCE, smart_crop=False):
+def fun_residual(x, time, irf, measured, rho=0, n1=1,n2=1.4, fit_start=0, fit_end=-1, mua_independent=True, phantom='semiinf',s=0, m=0, offset=0, geometry=GEOMETRY.TRANSMITTANCE, smart_crop=False, optimize_shift = True):
     """
-    :param x: [mua, musp] to be calculated
+    :param x: [mua, musp, shift] to be calculated
     :param irf: input response function
     :param time: time
     :param measured: measured quantity
     :param fit_start: initial index of fit range
     :param fit_end: final index of fit range
     :param rho: source detector separation
+    :param optimize_shift: If True, the shift parameter is optimized, otherwise it is set to 0
     """
     # Time convolution of irfs with DE performed within model fn
     # TODO:Find a way to do this more efficiently
-    shift=50
+    """
+    x[0] = mua
+    x[1] = musp
+    x[2] = time offset (in bins)
+    """
+    mua, musp, shift = x[0], x[1], x[2]
 
     model_vals = model(
         irf, rho, time, s,
-        x[0], x[1], n1, n2,
+        mua, musp, n1, n2,
         phantom, mua_independent, m,
-        offset=offset, geometry=geometry
+        offset=0, geometry=geometry
     )
 
-    # Pad model and measured for alignment
-    padded_model = np.pad(model_vals, (shift, 0))
-    padded_measured = np.pad(measured, (shift, 0))
+
+    if optimize_shift:
+        # measured = apply_offset(measured, shift)
+        model_vals = apply_offset(model_vals, shift)
+
+    # Match lengths
+    model_vals = model_vals[:len(measured)]
+    measured = measured[:len(model_vals)]
 
     if smart_crop:
-        # Find peak index of measured
-        peak_idx = padded_measured.argmax()
-        peak_val = padded_measured[peak_idx]
+        peak_idx = measured.argmax()
+        peak_val = measured[peak_idx]
 
-        # Find index to the left where value drops below 0.8
         left_idx = peak_idx
-        while left_idx > 0 and padded_measured[left_idx] > 0.8 * peak_val:
+        while left_idx > 0 and measured[left_idx] > 0.8 * peak_val:
             left_idx -= 1
 
-        # Find index to the right where value drops below 0.01
         right_idx = peak_idx
-        while right_idx < len(padded_measured) and padded_measured[right_idx] > 0.01 * peak_val:
+        while right_idx < len(measured) and measured[right_idx] > 0.01 * peak_val:
             right_idx += 1
 
-        fit_start = left_idx
-        fit_end = right_idx
-        print(left_idx, right_idx)
+        fit_start, fit_end = left_idx, right_idx
 
-    return padded_model[fit_start:fit_end] - padded_measured[fit_start:fit_end]
+    return (model_vals[fit_start:fit_end] - measured[fit_start:fit_end])
 
 
 
@@ -231,7 +237,9 @@ def fit_least_squares(
     fit_end=None,
     verbose=1,
     smart_crop=False,
-    normalization="none"
+    normalization="none",
+    optimize_shift=True,
+    interp_factor=1
 ):
     """
     Fit measurement values to a convolutional diffusion model using least squares.
@@ -246,6 +254,11 @@ def fit_least_squares(
     # Step 1: Convert to NumPy arrays
     meas = np.array(meas)
     irf = np.array(irf)
+
+    meas = interpolate_curve(meas, interp_factor)
+    irf = interpolate_curve(irf, interp_factor)
+    # Rescale time axis
+    time_arr = np.linspace(0, len(meas) * (time_arr[1]-time_arr[0]) / interp_factor, len(meas))
 
     if meas_noise_win is None or irf_noise_win is None:
         noise_win_percent = 0.08  # Use last 8% of the curve for noise window
@@ -295,18 +308,46 @@ def fit_least_squares(
             s=s, m=m,
             geometry=geometry,
             offset=offset,
-            smart_crop=smart_crop
+            smart_crop=smart_crop,
+            optimize_shift= optimize_shift
         ),
         x0,
         method='trf',
         # method='lm',
         args=(u, y),
         verbose=verbose,
-        bounds=([0, 0.1], [1000, 1000]) # Set bounds for mua and musp
+        bounds=([0, 0.1, -50*interp_factor], [1000, 1000, 50*interp_factor])
     )
 
-    print(f"Fit result: mua = {fit.x[0]:.5e}, musp = {fit.x[1]:.5e}")
+    print(f"Fit result: mua = {fit.x[0]:.5e}, musp = {fit.x[1]:.5e}, shift = {fit.x[2]:.2f} bins")
     return fit
+
+from scipy.interpolate import interp1d
+def apply_offset(model_vals, offset):
+    """
+    Apply a continuous shift to model_vals by interpolating.
+    Positive offset -> shift right (later in time)
+    Negative offset -> shift left (earlier in time)
+    """
+    x = np.arange(len(model_vals))
+    f = interp1d(x, model_vals, bounds_error=False, fill_value=0.0)
+    shifted = f(x - offset)   # shift curve by "offset" bins
+    return shifted
+
+from scipy.interpolate import interp1d
+
+def interpolate_curve(curve, factor=4):
+    """
+    Interpolate a curve by a given factor (default=4).
+    len=128 → len=128*factor.
+    """
+    if factor <= 1 or curve is None or len(curve) == 0:
+        return curve
+    x = np.arange(len(curve))
+    f = interp1d(x, curve, kind="linear")
+    new_x = np.linspace(0, len(curve)-1, len(curve)*factor)
+    return f(new_x)
+
 
 # #commenting this out as idk how Data works ngl
 # def fit_from_variables(vs):

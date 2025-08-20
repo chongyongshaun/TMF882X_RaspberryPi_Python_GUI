@@ -17,10 +17,11 @@ import os
 from TMF8828PiDataReader import DataReader
 from contini_model_panel import ContiniModelPanel
 from diffusion_equation.diffusion_equation import Contini1997
-from diffusion_equation.fit import convolve_irf_with_model
+from diffusion_equation.fit import apply_offset, convolve_irf_with_model, interpolate_curve
 from fitting_worker import FittingWorker
 from peak_filtering import area_normalize, peak_normalize
 from test_contini_model import GEOMETRY
+
 
 # -------------- TMF8828 Raspberry Pi Class --------------    
 class TMF8828RaspberryPiGUI:
@@ -55,6 +56,8 @@ class TMF8828RaspberryPiGUI:
         self.save_fitting = False
         self.normalize_graph_output = tk.BooleanVar(value=False)
         self.EPS = 1e-6  # small positive number
+        self.manual_ymin = tk.StringVar(value="")  # empty = auto
+        self.manual_ymax = tk.StringVar(value="")
 
         # top left corner
         self.model_frame = tk.LabelFrame(self.left_frame, text="Model", padx=5, pady=5, bg="white")
@@ -74,10 +77,6 @@ class TMF8828RaspberryPiGUI:
         self.status_labels = {}
         self.build_status_display()
         self.update_status_display()
-
-        self.ymin_pct = tk.DoubleVar(value=0)    # %
-        self.ymax_pct = tk.DoubleVar(value=100)  # %
-        self.manual_y_axis = False               # flag for manual mode
         self.build_graph_frame_misc()
 
         # self.fig, self.ax = plt.subplots()
@@ -90,13 +89,16 @@ class TMF8828RaspberryPiGUI:
         self.y_data = np.zeros(128)
         self.y_model_data = np.zeros(128)
         self.y_init_guess_data = np.zeros(128)
+        self.y_irf_data = np.zeros(128)
         self.line, = self.ax.plot(self.x_data, self.y_data, color='blue', label='Measurement Curve')
         self.line.set_marker('o')
         self.line.set_markersize(4)
         self.model_line, = self.ax.plot(self.x_data, np.zeros_like(self.x_data), color='red', linestyle='--', label='Fitted Model')
         self.initial_guess_line, = self.ax.plot(self.x_data, np.zeros_like(self.x_data), color='green', linestyle='--', label="Initial Guess")  
+        self.irf_line, = self.ax.plot([], [], color="purple", linestyle="-.", label="IRF")
         # self.initial_guess_line.set_visible(False)  # Hidden by default
         self.ax.legend()
+        self.ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
         self.ax.set_ylim(0, 100)
         self.ax.set_xlim(0, 127)
         self.ax.set_xlabel("Time Bins")
@@ -134,10 +136,10 @@ class TMF8828RaspberryPiGUI:
     def handle_fit_result(self, fit_result): 
         print("Live Fit Result:", fit_result) 
         # update the fit result label
-        self.fit_result_var.set(f"Fit Result: μa: {fit_result['mua']:.4f} mm, μs': {fit_result['musp']:.4f} mm, Cost: {fit_result['cost']:.4f}, Iterations: {fit_result['iterations']}\n Gradient: {fit_result['gradient']}, Optimality: {fit_result['optimality']}")
+        self.fit_result_var.set(f"Fit Result: μa: {fit_result['mua']:.4f} mm^-1, μs': {fit_result['musp']:.4f} mm^-1, shift: {fit_result['shift']:.4f}, Cost: {fit_result['cost']:.4f}, Iterations: {fit_result['iterations']}\n Gradient: {fit_result['gradient']}, Optimality: {fit_result['optimality']}")
 
         # create the fitting curve using the model
-        mua, musp = fit_result["mua"], fit_result["musp"]
+        mua, musp, shift = fit_result["mua"], fit_result["musp"], fit_result["shift"]
         settings = self.contini_model_panel.get_settings()
         rho = float(settings['rho'])
         t = settings['t']
@@ -152,6 +154,12 @@ class TMF8828RaspberryPiGUI:
         output = Contini1997([rho], t, s, mua, musp, n1, n2, phantom, mua_independent, m)["total"][0][0]
         model_conv = convolve_irf_with_model(self.contini_model_panel.irf, output, geometry=GEOMETRY.REFLECTANCE, offset=0, normalize_irf=True, normalize_model=True, denest_contini_output=False)
         
+        # print("Model convolution shape:", model_conv.shape)
+        # print("!!!!!!!!!!!!!!!!shift:", shift)
+        # print("before shift: ", model_conv[:10])
+        # model_conv = apply_offset(model_conv, shift)
+        # model_conv = model_conv[:len(model_conv)]
+        # print("after shift: ", model_conv[:10])
 
         if normalization == "area":
             fit_start = int(settings['fit_start'])
@@ -168,8 +176,10 @@ class TMF8828RaspberryPiGUI:
                 # Convert each value in model_conv to string and join with commas
                 csv_line = "#FIT;" + ';'.join(str(val) for val in model_conv)
                 f.write(csv_line + '\n')
+
         if self.normalize_graph_output.get(): #normalize before plotting
             model_conv = model_conv/max(model_conv) 
+
         if self.use_log_scale.get():
             EPS = 1e-6
             model_conv = np.clip(model_conv, EPS, None)  # Avoid zero in log scale
@@ -183,6 +193,7 @@ class TMF8828RaspberryPiGUI:
         if len(model_conv) == len(self.y_data):
             # residual = (self.y_data[xleft:xright] - model_conv[xleft:xright])/np.sqrt(self.y_data[xleft:xright])
             residual = (self.y_data - model_conv)/np.sqrt(self.y_data)
+            # residual = self.y_data - model_conv
             self.residual_line.set_ydata(residual)
             self.residual_ax.set_ylim(residual.min() * 1.1, residual.max() * 1.1)
         
@@ -203,12 +214,18 @@ class TMF8828RaspberryPiGUI:
                     if self.normalize_graph_output.get():  # Normalize if the option is selected
                         values = values / max(values) 
 
-                    # get rid of background
-                    bg = np.mean(values[100:120])
-                    values = values - bg
-
-
+                    # Calculate background as the average of the last 8% of values
+                    num_bg = max(1, int(len(values) * 0.08))
+                    background = np.mean(values[-num_bg:])
+                    values = values - background
                     values[values <= 0] = self.EPS
+
+                    # if self.show_interpolation:
+                    #     factor = int(self.contini_model_panel.get_settings().get('interp_factor', 1))
+                    #     values = interpolate_curve(values, factor=factor)
+                    #     self.line.set_xdata(np.linspace(0, len(values)-1, len(values)*factor))
+                        
+
                     self.y_data = values
                     self.line.set_ydata(self.y_data)
 
@@ -315,42 +332,7 @@ class TMF8828RaspberryPiGUI:
         log_checkbox.grid(row=1, column=1, padx=5, pady=5, sticky="w")
         self.toggle_measurement_button_graph_frame = tk.Button(plotting_options_frame, text="Stop Measurement", command=self.toggle_measurement, state=tk.DISABLED)
         self.toggle_measurement_button_graph_frame.grid(row=3, column=0, padx=5, pady=5, sticky="w")
-
-        # Inside build_graph_frame_misc or a new control frame
-        x_axis_frame = tk.LabelFrame(self.graph_frame, text="X-Axis Range", padx=5, pady=5, bg="white")
-        x_axis_frame.grid(row=4, column=1, padx=5, pady=5, sticky="w")
-
-        NUM_BINS = 128  # Assuming 128 bins as per the original code
-        self.xmin_var = tk.IntVar(value=0)
-        self.xmax_var = tk.IntVar(value=NUM_BINS-1)
-
-        tk.Label(x_axis_frame, text="Min:", bg="white").grid(row=0, column=0, sticky="w")
-        tk.Scale(x_axis_frame, from_=0, to=(NUM_BINS-1), orient="horizontal",
-                variable=self.xmin_var, command=lambda e: self.update_x_axis()).grid(row=0, column=1)
-
-        tk.Label(x_axis_frame, text="Max:", bg="white").grid(row=1, column=0, sticky="w")
-        tk.Scale(x_axis_frame, from_=0, to=(NUM_BINS-1), orient="horizontal",
-                variable=self.xmax_var, command=lambda e: self.update_x_axis()).grid(row=1, column=1)
-        
-
-        # Y-Axis Range (percentage-based)
-        y_axis_frame = tk.LabelFrame(self.graph_frame, text="Y-Axis Range (%)", padx=5, pady=5, bg="white")
-        y_axis_frame.grid(row=4, column=2, padx=5, pady=5, sticky="w")
-
-        self.ymin_pct = tk.DoubleVar(value=0)    # %
-        self.ymax_pct = tk.DoubleVar(value=100)  # %
-
-        tk.Label(y_axis_frame, text="Min %:", bg="white").grid(row=0, column=0, sticky="w")
-        tk.Scale(y_axis_frame, from_=0, to=100, orient="horizontal",
-                resolution=1,
-                variable=self.ymin_pct, command=lambda e: self.update_y_axis()).grid(row=0, column=1)
-
-        tk.Label(y_axis_frame, text="Max %:", bg="white").grid(row=1, column=0, sticky="w")
-        tk.Scale(y_axis_frame, from_=0, to=100, orient="horizontal",
-                resolution=1,
-                variable=self.ymax_pct, command=lambda e: self.update_y_axis()).grid(row=1, column=1)
-
-        
+   
         self.use_actual_time = tk.BooleanVar(value=False)
         time_checkbox = tk.Checkbutton(
             plotting_options_frame,
@@ -371,18 +353,108 @@ class TMF8828RaspberryPiGUI:
         )
         initial_guess_checkbox.grid(row=0, column=2, padx=5, pady=5, sticky="w")
 
-    def update_y_axis(self):
-        """Update percentage values for Y axis, let _safe_adjust_ylim apply it."""
-        if self.ymin_pct.get() < self.ymax_pct.get():
-            self.manual_y_axis = True  # enable manual override
-        else:
-            self.manual_y_axis = False  # invalid range, fall back to auto
-        # if ymin_pct < ymax_pct:
-        # ymin = (ymin_pct / 100.0) * current_max
-        # ymax = (ymax_pct / 100.0) * current_max
-        # self.ax.set_ylim(ymin, ymax)
-        # self.canvas.draw_idle()
+        self.show_irf = tk.BooleanVar(value=False)
+        irf_checkbox = tk.Checkbutton(
+            plotting_options_frame,
+            text="Show IRF Curve",
+            variable=self.show_irf,
+            bg="white",
+            command=self.update_irf_curve
+        )
+        irf_checkbox.grid(row=1, column=2, padx=5, pady=5, sticky="w")
 
+        self.show_interpolation = tk.BooleanVar(value=False)
+        interp_checkbox = tk.Checkbutton(
+            plotting_options_frame,
+            text="Show Interpolation",
+            variable=self.show_interpolation,
+            bg="white"
+        )
+        interp_checkbox.grid(row=0, column=3, padx=5, pady=5, sticky="w")
+        
+
+        # X axis and Y axis controls
+        x_axis_frame = tk.LabelFrame(self.graph_frame, text="X-Axis Range", padx=5, pady=5, bg="white")
+        x_axis_frame.grid(row=4, column=1, padx=5, pady=5, sticky="w")
+
+        NUM_BINS = 128  # Assuming 128 bins as per the original code
+        self.xmin_var = tk.IntVar(value=0)
+        self.xmax_var = tk.IntVar(value=NUM_BINS-1)
+
+        tk.Label(x_axis_frame, text="Min:", bg="white").grid(row=0, column=0, sticky="w")
+        tk.Scale(x_axis_frame, from_=0, to=(NUM_BINS-1), orient="horizontal",
+                variable=self.xmin_var, command=lambda e: self.update_x_axis()).grid(row=0, column=1)
+
+        tk.Label(x_axis_frame, text="Max:", bg="white").grid(row=1, column=0, sticky="w")
+        tk.Scale(x_axis_frame, from_=0, to=(NUM_BINS-1), orient="horizontal",
+                variable=self.xmax_var, command=lambda e: self.update_x_axis()).grid(row=1, column=1)
+        
+        y_axis_frame = tk.LabelFrame(self.graph_frame, text="Y-Axis Range", padx=5, pady=5, bg="white")
+        y_axis_frame.grid(row=4, column=2, padx=5, pady=5, sticky="w")
+
+        tk.Label(y_axis_frame, text="Min:", bg="white").grid(row=0, column=0, sticky="w")
+        tk.Entry(y_axis_frame, textvariable=self.manual_ymin, width=8).grid(row=0, column=1)
+
+        tk.Label(y_axis_frame, text="Max:", bg="white").grid(row=1, column=0, sticky="w")
+        tk.Entry(y_axis_frame, textvariable=self.manual_ymax, width=8).grid(row=1, column=1)
+
+        tk.Button(y_axis_frame, text="Apply", command=self.apply_manual_ylim).grid(row=2, column=0, padx=5)
+        tk.Button(y_axis_frame, text="Reset", command=self.reset_manual_ylim).grid(row=2, column=1, padx=5)
+
+
+    def get_num_bins(self):
+        """Return current number of bins (after interpolation if enabled)."""
+        if self.show_interpolation.get():
+            # y_data is stored raw, so multiply by factor
+            factor = int(self.contini_model_panel.get_settings().get('interp_factor', 1))
+            return len(self.y_data) * factor
+        else:
+            return len(self.y_data)
+
+    def apply_manual_ylim(self):
+        try:
+            ymin = float(self.manual_ymin.get()) if self.manual_ymin.get() else None
+            ymax = float(self.manual_ymax.get()) if self.manual_ymax.get() else None
+            if ymin is not None and ymax is not None and ymin < ymax:
+                self.ax.set_ylim(ymin, ymax)
+                self.canvas.draw_idle()
+        except ValueError:
+            messagebox.showerror("Error", "Invalid Y-axis values")
+
+    def reset_manual_ylim(self):
+        self.manual_ymin.set("")
+        self.manual_ymax.set("")
+        self._safe_adjust_ylim()
+        self.canvas.draw_idle()
+
+    def update_irf_curve(self):
+        if not self.show_irf.get():
+            # Hide curve
+            self.irf_line.set_visible(False)
+            self.canvas.draw()
+            return
+
+        # ---- If checked, recompute IRF curve ----
+        if not self.contini_model_panel.get_irf():
+            messagebox.showerror("Error", "No IRF loaded. Please load an IRF before showing the IRF curve.")
+            return
+
+        irf = self.contini_model_panel.get_irf()
+        irf = np.array(irf)
+        if self.normalize_graph_output.get():
+            irf = irf / np.max(irf)
+
+        if self.use_log_scale.get():
+            EPS = 1e-6
+            irf = np.where(irf <= 0, EPS, irf)
+        self.y_irf_data = irf
+        x = np.arange(len(irf))
+        self.irf_line.set_xdata(x)
+        self.irf_line.set_ydata(irf)
+        self.irf_line.set_visible(True)
+        
+        self._safe_adjust_ylim()   # important: include IRF in limits
+        self.canvas.draw_idle()
 
     def update_initial_guess_curve(self):
         if not self.show_initial_guess.get():
@@ -468,37 +540,43 @@ class TMF8828RaspberryPiGUI:
         """Toggle between linear and logarithmic Y-axis."""
         if self.use_log_scale.get():
             self.ax.set_yscale("log")
-            self.residual_ax.set_yscale("log")
-            self.normalize_graph_output.set(False)  # Disable normalization when using log scale
+            # self.residual_ax.set_yscale("log")
         else:
             self.ax.set_yscale("linear")
-            self.residual_ax.set_yscale("linear")
+            # self.residual_ax.set_yscale("linear")
         
         self._safe_adjust_ylim()
         self.canvas.draw_idle()
 
     def _safe_adjust_ylim(self):
+        # if manual y limits are set, use them
+        try:
+            ymin = float(self.manual_ymin.get()) if self.manual_ymin.get() else None
+            ymax = float(self.manual_ymax.get()) if self.manual_ymax.get() else None
+            if ymin is not None and ymax is not None and ymin < ymax:
+                self.ax.set_ylim(ymin, ymax)
+                return  # skip auto-scaling
+        except ValueError:
+            pass  # fall back to auto
+
         EPS = 1e-6  # Small positive number for linear scale
         # LOG_MIN = 1e-4  # Lower bound for log scale
-        LOG_MIN = 1  # Lower bound for log scale
+        LOG_MIN = 1e-6  # Lower bound for log scale
 
-        ymin = LOG_MIN if self.ax.get_yscale() == "log" else 0
+        if self.ax.get_yscale() == "log":
+            ymin = max(self.y_data[self.y_data > 0].min() * 0.5, LOG_MIN)
+        else:
+            ymin = 0
         
 
         #get the maximum y value comparing all 3 curves
         y_max_meas = self.y_data.max()
         y_max_model = self.y_model_data.max()
         y_max_init_guess = self.y_init_guess_data.max() if self.show_initial_guess.get() else 0
-        y_max = max(y_max_meas, y_max_model, y_max_init_guess, LOG_MIN if self.ax.get_yscale() == "log" else EPS)
+        y_max_irf = self.y_irf_data.max() if hasattr(self, "y_irf_data") and self.irf_line.get_visible() else 0
+        y_max = max(y_max_meas, y_max_model, y_max_init_guess, y_max_irf) * 1.1
 
-        if self.manual_y_axis:
-            ymin = (self.ymin_pct.get() / 100.0) * y_max
-            ymax = (self.ymax_pct.get() / 100.0) * y_max
-        else:
-            ymin = LOG_MIN if self.ax.get_yscale() == "log" else 0
-            ymax = y_max * 1.1
-
-        self.ax.set_ylim(ymin, ymax)
+        self.ax.set_ylim(ymin, y_max)
 
         # Residual plot
         y_resid = self.residual_line.get_ydata()
