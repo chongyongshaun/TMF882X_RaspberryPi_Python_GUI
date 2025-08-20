@@ -97,7 +97,7 @@ class TMF8828RaspberryPiGUI:
         self.initial_guess_line, = self.ax.plot(self.x_data, np.zeros_like(self.x_data), color='green', linestyle='--', label="Initial Guess")  
         self.irf_line, = self.ax.plot([], [], color="purple", linestyle="-.", label="IRF")
         # self.initial_guess_line.set_visible(False)  # Hidden by default
-        self.ax.legend()
+        
         self.ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
         self.ax.set_ylim(0, 100)
         self.ax.set_xlim(0, 127)
@@ -109,6 +109,12 @@ class TMF8828RaspberryPiGUI:
         self.residual_ax.set_ylabel("Residual")
         self.residual_ax.set_xlabel("Time Bins")
         self.residual_ax.legend()
+
+        self.fit_start_line = self.ax.axvline(x=0, color="black", linestyle=":", label="Fit Start")
+        self.fit_end_line = self.ax.axvline(x=127, color="black", linestyle=":", label="Fit End")
+        self.fit_start_line.set_visible(False)
+        self.fit_end_line.set_visible(False)
+        self.ax.legend()
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
         self.canvas.get_tk_widget().grid(row=1, column=0, padx=5, pady=5)
@@ -131,6 +137,23 @@ class TMF8828RaspberryPiGUI:
             self.fitting_worker.start()
             print("Fitting worker started.")
             self.filter_meas_checkbox.config(state=tk.NORMAL)  # Initially disabled
+
+    def update_fit_window_lines(self):
+        """Update vertical lines for fit start and fit end."""
+        settings = self.contini_model_panel.get_settings()
+        try:
+            fit_start = int(settings.get('fit_start', 0))
+            fit_end = int(settings.get('fit_end', len(self.y_data)-1))
+            
+            self.fit_start_line.set_xdata([fit_start, fit_start])
+            self.fit_end_line.set_xdata([fit_end, fit_end])
+
+            self.fit_start_line.set_visible(True)
+            self.fit_end_line.set_visible(True)
+            
+            self.canvas.draw_idle()
+        except Exception as e:
+            print(f"Error updating fit window lines: {e}")
 
     #callback function for FittingWorker, if you want to do something with the fit result this function will be called whenever a fit result is available
     def handle_fit_result(self, fit_result): 
@@ -232,6 +255,8 @@ class TMF8828RaspberryPiGUI:
                     if self.use_log_scale.get():
                         EPS = 1e-6
                         values = np.clip(values, EPS, None)  # Avoid zero in log scale
+                    
+                    self.update_fit_window_lines()
 
                     self._safe_adjust_ylim() 
 
