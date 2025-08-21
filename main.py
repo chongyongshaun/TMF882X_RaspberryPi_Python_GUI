@@ -38,6 +38,8 @@ class TMF8828RaspberryPiGUI:
         self.status_queue = queue.Queue()
         self.fit_data_queue = queue.Queue()
         self.reader = DataReader(self.plot_data_queue, self.fit_data_queue, self.selected_channels, self.status_queue)
+        # from simulation_reader import SimulationReader
+        # self.reader = SimulationReader(self.plot_data_queue, self.fit_data_queue, self.status_queue, interval=0.2)
 
         self.fitting_worker = None
 
@@ -55,6 +57,7 @@ class TMF8828RaspberryPiGUI:
         #options:
         self.save_fitting = False
         self.normalize_graph_output = tk.BooleanVar(value=False)
+        self.area_normalize_graph_output = tk.BooleanVar(value=False)
         self.EPS = 1e-6  # small positive number
         self.manual_ymin = tk.StringVar(value="")  # empty = auto
         self.manual_ymax = tk.StringVar(value="")
@@ -157,71 +160,97 @@ class TMF8828RaspberryPiGUI:
 
     #callback function for FittingWorker, if you want to do something with the fit result this function will be called whenever a fit result is available
     def handle_fit_result(self, fit_result): 
-        print("Live Fit Result:", fit_result) 
-        # update the fit result label
-        self.fit_result_var.set(f"Fit Result: μa: {fit_result['mua']:.4f} mm^-1, μs': {fit_result['musp']:.4f} mm^-1, shift: {fit_result['shift']:.4f}, Cost: {fit_result['cost']:.4f}, Iterations: {fit_result['iterations']}\n Gradient: {fit_result['gradient']}, Optimality: {fit_result['optimality']}")
+        try:
+            print("Live Fit Result:", fit_result) 
+            self.fit_result_var.set(
+                f"Fit Result: μa: {fit_result['mua']:.4f} mm^-1, μs': {fit_result['musp']:.4f} mm^-1, "
+                f"shift: {fit_result['shift']:.4f}, Cost: {fit_result['cost']:.4f}, "
+                f"Iterations: {fit_result['iterations']}\n Gradient: {fit_result['gradient']}, "
+                f"Optimality: {fit_result['optimality']}"
+            )
+        except Exception as e:
+            print(f"[Callback] Error updating label: {e}")
+            return
 
-        # create the fitting curve using the model
-        mua, musp, shift = fit_result["mua"], fit_result["musp"], fit_result["shift"]
-        settings = self.contini_model_panel.get_settings()
-        rho = float(settings['rho'])
-        t = settings['t']
-        s = float(settings['s'])
-        n1 = float(settings['n1'])
-        n2 = float(settings['n2'])
-        phantom = settings['phantom']
-        mua_independent = settings['mua_independent'].lower() == 'true'
-        m = int(settings['m'])
-        normalization = settings['normalization'].lower()
+        try:
+            # Build model curve
+            settings = self.contini_model_panel.get_settings()
+            mua, musp, shift = fit_result["mua"], fit_result["musp"], fit_result["shift"]
 
-        output = Contini1997([rho], t, s, mua, musp, n1, n2, phantom, mua_independent, m)["total"][0][0]
-        model_conv = convolve_irf_with_model(self.contini_model_panel.irf, output, geometry=GEOMETRY.REFLECTANCE, offset=0, normalize_irf=True, normalize_model=True, denest_contini_output=False)
-        
-        # print("Model convolution shape:", model_conv.shape)
-        # print("!!!!!!!!!!!!!!!!shift:", shift)
-        # print("before shift: ", model_conv[:10])
-        # model_conv = apply_offset(model_conv, shift)
-        # model_conv = model_conv[:len(model_conv)]
-        # print("after shift: ", model_conv[:10])
+            rho = float(settings['rho'])
+            t = settings['t']
+            s = float(settings['s'])
+            n1 = float(settings['n1'])
+            n2 = float(settings['n2'])
+            phantom = settings['phantom']
+            mua_independent = settings['mua_independent'].lower() == 'true'
+            m = int(settings['m'])
+            normalization = settings['normalization'].lower()
 
-        if normalization == "area":
-            fit_start = int(settings['fit_start'])
-            fit_end = int(settings['fit_end'])
-            model_conv = area_normalize(model_conv, self.y_data, fit_start, fit_end)
-        elif normalization == "peak":
-            model_conv = peak_normalize(model_conv)
+            output = Contini1997([rho], t, s, mua, musp, n1, n2, phantom,
+                                mua_independent, m)["total"][0][0]
+            model_conv = convolve_irf_with_model(
+                self.contini_model_panel.irf, output,
+                geometry=GEOMETRY.REFLECTANCE,
+                offset=0, normalize_irf=True, normalize_model=True,
+                denest_contini_output=False
+            )
 
+            # Interpolation
+            if self.show_interpolation.get():
+                factor = int(settings.get('interp_factor', 1))
+                model_conv = interpolate_curve(model_conv, factor=factor)
+                x = np.linspace(0, 127, len(model_conv))
+            else:
+                # rebuild x so that it always matches model_conv
+                x = np.linspace(0, 127, len(model_conv))
 
-        if self.save_fitting and self.file_path_var.get():
-            #save raw model_conv to a csv file
-            file_path = self.file_path_var.get()
-            with open(file_path, 'a') as f:
-                # Convert each value in model_conv to string and join with commas
-                csv_line = "#FIT;" + ';'.join(str(val) for val in model_conv)
-                f.write(csv_line + '\n')
+            if len(model_conv) != len(x):
+                print(f"[Callback] Length mismatch: model_conv={len(model_conv)}, x={len(x)}")
 
-        if self.normalize_graph_output.get(): #normalize before plotting
-            model_conv = model_conv/max(model_conv) 
+            self.model_line.set_xdata(x)
+            self.model_line.set_ydata(model_conv)
 
-        if self.use_log_scale.get():
-            EPS = 1e-6
-            model_conv = np.clip(model_conv, EPS, None)  # Avoid zero in log scale
+        except Exception as e:
+            print(f"[Callback] Error building model curve: {e}")
+            return
 
-        self.y_model_data = model_conv
-        self.model_line.set_ydata(model_conv)
+        try:
+            # Normalization & saving
+            if self.area_normalize_graph_output.get(): 
+                fit_start = int(settings['fit_start'])
+                fit_end = int(settings['fit_end'])
+                model_conv = area_normalize(model_conv, self.y_data, fit_start, fit_end)
 
-        if self.show_initial_guess.get():
-            self.update_initial_guess_curve()
+            if self.normalize_graph_output.get():
+                model_conv = peak_normalize(model_conv)
 
-        if len(model_conv) == len(self.y_data):
-            # residual = (self.y_data[xleft:xright] - model_conv[xleft:xright])/np.sqrt(self.y_data[xleft:xright])
-            residual = (self.y_data - model_conv)/np.sqrt(self.y_data)
-            # residual = self.y_data - model_conv
-            self.residual_line.set_ydata(residual)
-            self.residual_ax.set_ylim(residual.min() * 1.1, residual.max() * 1.1)
-        
-        self.canvas.draw()
-        print("Model line updated with new fit result.")
+            if self.use_log_scale.get():
+                model_conv = np.clip(model_conv, 1e-6, None)
+
+            if self.save_fitting and self.file_path_var.get():
+                with open(self.file_path_var.get(), 'a') as f:
+                    csv_line = "#FIT;" + ';'.join(str(val) for val in model_conv)
+                    f.write(csv_line + '\n')
+
+            self.y_model_data = model_conv
+
+            # Residuals
+            try:
+                self.residual_line.set_xdata(x)
+                if len(model_conv) == len(self.y_data):
+                    residual = (self.y_data - model_conv) / np.sqrt(self.y_data)
+                    self.residual_line.set_ydata(residual)
+                    self.residual_ax.set_ylim(residual.min() * 1.1, residual.max() * 1.1)
+            except Exception as e:
+                print(f"[Callback] Residuals skipped: y_data={len(self.y_data)}, model_conv={len(model_conv)}")
+                print(f"[Callback] Error computing residuals: {e}")
+
+            self.canvas.draw()
+
+        except Exception as e:
+            print(f"[Callback] Error during normalization/saving/drawing: {e}")
+
 
     def update_plot(self):
         while not self.plot_data_queue.empty():
@@ -234,8 +263,14 @@ class TMF8828RaspberryPiGUI:
                     #     bar.set_height(val)
                     # self.ax.set_ylim(0, values.max() * 1.1)
 
-                    if self.normalize_graph_output.get():  # Normalize if the option is selected
-                        values = values / max(values) 
+                    settings = self.contini_model_panel.get_settings()
+                    if self.area_normalize_graph_output.get(): 
+                        fit_start = int(settings['fit_start'])
+                        fit_end = int(settings['fit_end'])
+                        values = area_normalize(values, self.y_data, fit_start, fit_end)
+
+                    if self.normalize_graph_output.get(): #normalize before plotting
+                        values = peak_normalize(values)
 
                     # Calculate background as the average of the last 8% of values
                     num_bg = max(1, int(len(values) * 0.08))
@@ -243,14 +278,20 @@ class TMF8828RaspberryPiGUI:
                     values = values - background
                     values[values <= 0] = self.EPS
 
-                    # if self.show_interpolation:
-                    #     factor = int(self.contini_model_panel.get_settings().get('interp_factor', 1))
-                    #     values = interpolate_curve(values, factor=factor)
-                    #     self.line.set_xdata(np.linspace(0, len(values)-1, len(values)*factor))
-                        
+                    # print("Values before interpolation:", values[:10], "x:", self.x_data[:10], "shape", values.shape)
+                    if self.show_interpolation.get():
+                        factor = int(self.contini_model_panel.get_settings().get('interp_factor', 1))
+                        values = interpolate_curve(values, factor=factor)
+                        x = np.linspace(0, 127, len(values))
+                    else:
+                        # raw measurement, keep 128 bins
+                        x = np.arange(len(values))
 
+                    # Update line once, consistently
                     self.y_data = values
-                    self.line.set_ydata(self.y_data)
+                    self.line.set_xdata(x)
+                    self.line.set_ydata(values)
+
 
                     if self.use_log_scale.get():
                         EPS = 1e-6
@@ -330,21 +371,32 @@ class TMF8828RaspberryPiGUI:
 
         plotting_options_frame = tk.LabelFrame(self.graph_frame, text="Plotting Options", padx=5, pady=5, bg="white")
         plotting_options_frame.grid(row=4, column=0, padx=5, pady=5, sticky="w")
-        # Normalize output checkbox
+        # peak Normalize output checkbox
         normalize_checkbox = tk.Checkbutton(
             plotting_options_frame,
             text="Peak Normalize Graph Output",
             variable=self.normalize_graph_output,
+            command=self.rerender,
             bg="white"
         )
         normalize_checkbox.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        # area Normalize output checkbox
+        area_normalize_checkbox = tk.Checkbutton(
+            plotting_options_frame,
+            text="Area Normalize Graph Output",
+            variable=self.area_normalize_graph_output,
+            command=self.rerender,
+            bg="white"
+        )
+        area_normalize_checkbox.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+
         self.filter_meas_checkbox = tk.Checkbutton(
             plotting_options_frame,
             text="Filter Largest Peak and Noise before fitting",
             bg="white",
             command=lambda: self.fitting_worker.toggle_filter_largest_peak() if self.fitting_worker else None,
         )
-        self.filter_meas_checkbox.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.filter_meas_checkbox.grid(row=1, column=1, padx=5, pady=5, sticky="w")
         self.filter_meas_checkbox.config(state=tk.DISABLED)  # Initially disabled
         self.use_log_scale = tk.BooleanVar(value=False)
         log_checkbox = tk.Checkbutton(
@@ -354,7 +406,7 @@ class TMF8828RaspberryPiGUI:
             bg="white",
             command=self.toggle_log_scale
         )
-        log_checkbox.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        log_checkbox.grid(row=1, column=2, padx=5, pady=5, sticky="w")
         self.toggle_measurement_button_graph_frame = tk.Button(plotting_options_frame, text="Stop Measurement", command=self.toggle_measurement, state=tk.DISABLED)
         self.toggle_measurement_button_graph_frame.grid(row=3, column=0, padx=5, pady=5, sticky="w")
    
@@ -386,7 +438,7 @@ class TMF8828RaspberryPiGUI:
             bg="white",
             command=self.update_irf_curve
         )
-        irf_checkbox.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+        irf_checkbox.grid(row=1, column=3, padx=5, pady=5, sticky="w")
 
         self.show_interpolation = tk.BooleanVar(value=False)
         interp_checkbox = tk.Checkbutton(
@@ -452,6 +504,14 @@ class TMF8828RaspberryPiGUI:
         self._safe_adjust_ylim()
         self.canvas.draw_idle()
 
+    def rerender(self):
+        """Recompute and redraw the graph with current settings."""
+        self.update_irf_curve()
+        self.update_initial_guess_curve()
+        self.update_plot()
+        self._safe_adjust_ylim()
+        self.canvas.draw_idle()
+
     def update_irf_curve(self):
         if not self.show_irf.get():
             # Hide curve
@@ -466,8 +526,26 @@ class TMF8828RaspberryPiGUI:
 
         irf = self.contini_model_panel.get_irf()
         irf = np.array(irf)
+
+        settings = self.contini_model_panel.get_settings()
+        if self.area_normalize_graph_output.get(): 
+            fit_start = int(settings['fit_start'])
+            fit_end = int(settings['fit_end'])
+            irf = area_normalize(irf, self.y_data, fit_start, fit_end)
+        
+        if self.show_interpolation.get():
+            factor = int(self.contini_model_panel.get_settings().get('interp_factor', 1))
+            irf = interpolate_curve(irf, factor=factor)
+
+            # x has the same length as y but spans the original 0–127 range
+            x = np.linspace(0, 127, len(irf))
+            self.line.set_xdata(x)
+        else:
+            self.line.set_xdata(self.x_data)
+            
+
         if self.normalize_graph_output.get():
-            irf = irf / np.max(irf)
+            irf = peak_normalize(irf)
 
         if self.use_log_scale.get():
             EPS = 1e-6
@@ -507,15 +585,13 @@ class TMF8828RaspberryPiGUI:
         output = Contini1997([rho], t, s, mua, musp, n1, n2, phantom, mua_independent, m)["total"][0][0]
         model_init_conv = convolve_irf_with_model(self.contini_model_panel.irf, output, geometry=GEOMETRY.REFLECTANCE, offset=0, normalize_irf=True, normalize_model=True, denest_contini_output=False)
         
-        if normalization == "area":
+        if self.area_normalize_graph_output.get(): 
             fit_start = int(settings['fit_start'])
             fit_end = int(settings['fit_end'])
             model_init_conv = area_normalize(model_init_conv, self.y_data, fit_start, fit_end)
-        elif normalization == "peak":
-            model_init_conv = peak_normalize(model_init_conv)
 
         if self.normalize_graph_output.get(): #normalize before plotting
-            model_init_conv = model_init_conv/max(model_init_conv) 
+            model_init_conv = peak_normalize(model_init_conv)
         if self.use_log_scale.get():
             EPS = 1e-6
             model_init_conv = np.clip(model_init_conv, EPS, None)  # Avoid zero in log scale
@@ -570,8 +646,7 @@ class TMF8828RaspberryPiGUI:
             self.ax.set_yscale("linear")
             # self.residual_ax.set_yscale("linear")
         
-        self._safe_adjust_ylim()
-        self.canvas.draw_idle()
+        self.rerender()
 
     def _safe_adjust_ylim(self):
         # if manual y limits are set, use them

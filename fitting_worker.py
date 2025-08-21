@@ -48,7 +48,10 @@ class FittingWorker(threading.Thread):
                     fit_result = self.perform_fit(values, settings, self.irf)
 
                     if self.result_callback:
-                        self.result_callback(fit_result)
+                        try:
+                            self.result_callback(fit_result)
+                        except Exception as cb_err:
+                            print(f"[FittingWorker] Error in result_callback: {cb_err}")
 
             except Exception as e:
                 print(f"[FittingWorker] Error during fitting: {e}")

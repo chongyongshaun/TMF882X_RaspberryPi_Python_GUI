@@ -141,16 +141,16 @@ class ContiniModelPanel:
         # phantom
         ttk.Label(self.input_frame, text="Phantom Type").grid(row=8, column=0, sticky='w', padx=5, pady=5)
         phantom_combo = ttk.Combobox(self.input_frame, values=["slab", "semiinf"], state="readonly")
-        phantom_combo.set(self.params['phantom'])  # default
+        phantom_combo.set(self.params['phantom']) 
         phantom_combo.grid(row=8, column=1, padx=5, pady=5)
         self.entries['phantom'] = phantom_combo
 
         # mua_independent
         ttk.Label(self.input_frame, text="Mua Independent? (True or False)").grid(row=9, column=0, sticky='w', padx=5, pady=5)
-        entry_mua_independent = ttk.Entry(self.input_frame)
-        entry_mua_independent.insert(0, self.params['mua_independent'])
-        entry_mua_independent.grid(row=9, column=1, padx=5, pady=5)
-        self.entries['mua_independent (True/False)'] = entry_mua_independent
+        mua_indep_combo = ttk.Combobox(self.input_frame, values=["True", "False"], state="readonly")
+        mua_indep_combo.set(self.params['mua_independent'])  
+        mua_indep_combo.grid(row=9, column=1, padx=5, pady=5)
+        self.entries['mua_independent (True/False)'] = mua_indep_combo
 
         # m (num imaginary sources)
         ttk.Label(self.input_frame, text="Number of Imaginary Sources (m)").grid(row=10, column=0, sticky='w', padx=5, pady=5)
@@ -193,10 +193,10 @@ class ContiniModelPanel:
         # )
         # smart_crop_checkbox.grid(row=14, column=0, columnspan=2, sticky='w', padx=5, pady=5)
         ttk.Label(self.input_frame, text="Smart Crop (True or False)").grid(row=14, column=0, sticky='w', padx=5, pady=5)
-        entry_smart_crop = ttk.Entry(self.input_frame)
-        entry_smart_crop.insert(0, self.params['smart_crop'])
-        entry_smart_crop.grid(row=14, column=1, padx=5, pady=5)
-        self.entries['smart_crop'] = entry_smart_crop
+        smart_crop_combo = ttk.Combobox(self.input_frame, values=["True", "False"], state="readonly")
+        smart_crop_combo.set(self.params['smart_crop'])  
+        smart_crop_combo.grid(row=14, column=1, padx=5, pady=5)
+        self.entries['smart_crop'] = smart_crop_combo
 
         # irf noise window
         ttk.Label(self.input_frame, text="IRF Noise Window (start,end)").grid(row=15, column=0, sticky='w', padx=5, pady=5)
@@ -226,10 +226,10 @@ class ContiniModelPanel:
         self.entries['shift'] = entry_shift
 
         ttk.Label(self.input_frame, text="Optimize Shift (True or False)").grid(row=19, column=0, sticky='w', padx=5, pady=5)
-        entry_optimize_shift = ttk.Entry(self.input_frame)
-        entry_optimize_shift.insert(0, self.params['optimize_shift'])
-        entry_optimize_shift.grid(row=19, column=1, padx=5, pady=5)
-        self.entries['optimize_shift'] = entry_optimize_shift
+        optimize_shift_combo = ttk.Combobox(self.input_frame, values=["True", "False"], state="readonly")
+        optimize_shift_combo.set(self.params['optimize_shift'])  
+        optimize_shift_combo.grid(row=19, column=1, padx=5, pady=5)
+        self.entries['optimize_shift'] = optimize_shift_combo
 
         ttk.Label(self.input_frame, text="Interpolation Factor").grid(row=20, column=0, sticky='w', padx=5, pady=5)
         entry_interp_factor = ttk.Entry(self.input_frame)
