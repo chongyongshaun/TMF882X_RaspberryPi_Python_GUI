@@ -1,10 +1,5 @@
 
 # -*- coding: utf-8 -*-
-"""
-Created on Tue Mar 25 12:22:32 2025
-
-@author: keela
-"""
 
 import queue
 import numpy as np
