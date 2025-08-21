@@ -208,22 +208,26 @@ class TMF8828RaspberryPiGUI:
             if len(model_conv) != len(x):
                 print(f"[Callback] Length mismatch: model_conv={len(model_conv)}, x={len(x)}")
 
-            self.model_line.set_xdata(x)
-            self.model_line.set_ydata(model_conv)
-
         except Exception as e:
             print(f"[Callback] Error building model curve: {e}")
             return
 
         try:
             # Normalization & saving
+            
+
+            if self.normalize_graph_output.get():
+                model_conv = peak_normalize(model_conv)
+                print("PEAK NORMALIZATION GETTING APPLIED")
+
             if self.area_normalize_graph_output.get(): 
                 fit_start = int(settings['fit_start'])
                 fit_end = int(settings['fit_end'])
                 model_conv = area_normalize(model_conv, self.y_data, fit_start, fit_end)
+                print("AREA NORMALIZATION GETTING APPLIED")
 
-            if self.normalize_graph_output.get():
-                model_conv = peak_normalize(model_conv)
+            # applying shift
+            model_conv = apply_offset(model_conv, shift)
 
             if self.use_log_scale.get():
                 model_conv = np.clip(model_conv, 1e-6, None)
@@ -246,6 +250,9 @@ class TMF8828RaspberryPiGUI:
                 print(f"[Callback] Residuals skipped: y_data={len(self.y_data)}, model_conv={len(model_conv)}")
                 print(f"[Callback] Error computing residuals: {e}")
 
+            print("model being rendered")
+            self.model_line.set_xdata(x)
+            self.model_line.set_ydata(model_conv)
             self.canvas.draw()
 
         except Exception as e:
